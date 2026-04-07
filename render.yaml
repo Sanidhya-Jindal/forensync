@@ -18,8 +18,11 @@ services:
         value: 6333
     
   # Frontend Static Site
-  - type: static
+  - type: web
     name: forensync-frontend
+    env: static
+    region: oregon
+    plan: free
     buildCommand: "cd frontend && npm install && npm run build"
     staticPublishPath: ./frontend/dist
     routes:
