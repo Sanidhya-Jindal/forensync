@@ -1,0 +1,24 @@
+# Production dependencies for FORENSYNC
+
+# FastAPI and server
+fastapi==0.115.0
+uvicorn[standard]==0.32.0
+gunicorn==23.0.0
+python-multipart==0.0.20
+
+# Database
+sqlalchemy==2.0.36
+
+# Vector Database
+qdrant-client==1.12.1
+
+# AI/ML
+sentence-transformers==3.3.1
+insightface==0.7.3
+onnxruntime==1.20.1
+opencv-python-headless==4.10.0.84
+
+# Utilities
+numpy==1.26.4
+pillow==11.0.0
+python-dotenv==1.0.1

@@ -1,0 +1,151 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: 'Matter', 'Matter SQ', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  letter-spacing: -0.01em;
+}
+
+/* Warp-style scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #1A1A1A;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #333333;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #444444;
+}
+
+/* Animations */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -1000px 0;
+  }
+  100% {
+    background-position: 1000px 0;
+  }
+}
+
+@layer components {
+  .btn-warp {
+    @apply px-4 py-2 rounded-lg font-medium text-sm transition-all duration-200;
+    @apply bg-transparent text-white;
+    border: 1px solid #333333;
+  }
+  .btn-warp:hover {
+    background-color: #262626;
+    border-color: #717171;
+    transform: translateY(-1px);
+  }
+  
+  .btn-warp-primary {
+    @apply px-4 py-2 rounded-lg font-medium text-sm transition-all duration-200;
+    @apply bg-white text-black border-0;
+  }
+  .btn-warp-primary:hover {
+    @apply bg-gray-200;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(255,255,255,0.1);
+  }
+  
+  .btn-warp-orange {
+    @apply px-4 py-2 rounded-lg font-medium text-sm transition-all duration-200;
+    @apply text-white border-0;
+    background-color: #F87171;
+  }
+  .btn-warp-orange:hover {
+    background-color: #EF4444;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 16px rgba(248,113,113,0.4);
+  }
+  
+  .card-warp {
+    background-color: #262626;
+    border: 1px solid #333333;
+    @apply rounded-xl;
+    transition: all 0.3s ease;
+    animation: fadeIn 0.5s ease-out;
+  }
+  .card-warp:hover {
+    border-color: #444444;
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  }
+  
+  .input-warp {
+    @apply w-full px-4 py-3 rounded-lg text-sm;
+    @apply text-white;
+    background-color: #1A1A1A;
+    border: 1px solid #333333;
+    transition: all 0.2s ease;
+  }
+  .input-warp::placeholder {
+    color: #717171;
+  }
+  .input-warp:focus {
+    @apply outline-none;
+    border-color: #F87171;
+    box-shadow: 0 0 0 3px rgba(248,113,113,0.1);
+  }
+  
+  .label-warp {
+    @apply text-xs font-medium uppercase tracking-wider;
+    color: #F87171;
+  }
+
+  .animate-fade-in {
+    animation: fadeIn 0.5s ease-out;
+  }
+
+  .animate-slide-in {
+    animation: slideIn 0.3s ease-out;
+  }
+}
