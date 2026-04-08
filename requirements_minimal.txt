@@ -5,22 +5,15 @@ python-multipart==0.0.18
 
 # Database
 python-dotenv==1.0.1
-sqlalchemy==2.0.36
 
-# Vector Database
+# Vector Database (lightweight)
 qdrant-client==1.12.1
 
-# AI/ML - Face Recognition
-insightface==0.7.3
-onnxruntime==1.20.1
-opencv-python-headless==4.10.0.84
-
-# AI/ML - Text Processing
+# Text processing (lightweight)
 sentence-transformers==3.3.1
 
 # Utilities
 numpy==1.26.4
-pillow==11.0.0
 
 # HTTP client
 httpx==0.28.1
