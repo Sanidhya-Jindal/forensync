@@ -2,27 +2,27 @@ services:
   # Backend API
   - type: web
     name: forensync-backend
-    env: python
+    runtime: python
     region: oregon
     plan: free
     buildCommand: "pip install -r requirements_production.txt && python setup_database.py"
     startCommand: "uvicorn main:app --host 0.0.0.0 --port $PORT"
+    healthCheckPath: /health
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.0
-      - key: DATABASE_URL
-        value: sqlite:///./missing_persons.db
-      - key: QDRANT_HOST
-        value: localhost
-      - key: QDRANT_PORT
-        value: 6333
+      - key: PORT
+        value: 10000
     
   # Frontend Static Site
   - type: web
     name: forensync-frontend
-    env: static
+    runtime: static
     buildCommand: "cd frontend && npm install && npm run build"
     staticPublishPath: ./frontend/dist
+    pullRequestPreviewsEnabled: true
     envVars:
+      - key: NODE_VERSION
+        value: 20.11.0
       - key: VITE_API_URL
         value: https://forensync-backend.onrender.com
