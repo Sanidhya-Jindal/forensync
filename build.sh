@@ -5,8 +5,7 @@ set -o errexit
 
 # Install Python dependencies
 pip install --upgrade pip
-pip install -r requirements.txt
-pip install -r requirements_face_recognition.txt
+pip install -r requirements_production.txt
 
 # Create necessary directories
 mkdir -p photos/missing_persons
