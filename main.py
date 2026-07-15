@@ -4,7 +4,7 @@ Provides REST API endpoints for reporting and searching
 """
 
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import Optional, List
@@ -41,9 +41,13 @@ app = FastAPI(
 )
 
 # Add CORS middleware
+allowed_origins = os.environ.get(
+    "CORS_ORIGINS", "http://localhost:5173,http://localhost:3000"
+).split(",")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, specify exact origins
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -55,6 +59,89 @@ QDRANT_DATA_PATH = "./qdrant_data"
 PHOTO_BASE_DIR = "photos"
 UIDB_PHOTO_DIR = os.path.join(PHOTO_BASE_DIR, "unidentified_bodies")
 MISSING_PHOTO_DIR = os.path.join(PHOTO_BASE_DIR, "missing_persons")
+
+
+# ============================================================================
+# DATABASE AUTO-SETUP
+# ============================================================================
+
+def ensure_database_schema():
+    """Create database tables if they don't exist"""
+    schema_file = 'database_schema_sqlite.sql'
+    if not os.path.exists(DB_FILE):
+        conn = sqlite3.connect(DB_FILE)
+        if os.path.exists(schema_file):
+            with open(schema_file, 'r') as f:
+                conn.executescript(f.read())
+            print(f"✓ Database created from schema: {DB_FILE}")
+        else:
+            conn.executescript('''
+                CREATE TABLE IF NOT EXISTS missing_persons (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    pid TEXT UNIQUE NOT NULL,
+                    fir_number TEXT NOT NULL,
+                    police_station TEXT NOT NULL,
+                    reported_date TEXT NOT NULL,
+                    name TEXT, age INTEGER,
+                    gender TEXT CHECK (gender IN ('Male', 'Female', 'Other', 'Unknown')),
+                    height_cm INTEGER, build TEXT, hair_color TEXT, eye_color TEXT,
+                    distinguishing_marks TEXT, clothing_description TEXT, person_description TEXT,
+                    last_seen_date TEXT, last_seen_latitude REAL, last_seen_longitude REAL,
+                    last_seen_address TEXT, profile_photo TEXT, extra_photos TEXT,
+                    reporter_name TEXT, reporter_contact TEXT, additional_notes TEXT,
+                    status TEXT DEFAULT 'Open',
+                    created_at TEXT DEFAULT (datetime('now')),
+                    updated_at TEXT DEFAULT (datetime('now'))
+                );
+                CREATE TABLE IF NOT EXISTS unidentified_bodies (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    pid TEXT UNIQUE NOT NULL,
+                    case_number TEXT NOT NULL,
+                    police_station TEXT NOT NULL,
+                    reported_date TEXT NOT NULL,
+                    found_date TEXT NOT NULL,
+                    postmortem_date TEXT, estimated_age INTEGER,
+                    gender TEXT CHECK (gender IN ('Male', 'Female', 'Other', 'Unknown')),
+                    height_cm INTEGER, build TEXT, complexion TEXT, face_shape TEXT,
+                    hair_color TEXT, eye_color TEXT,
+                    distinguishing_marks TEXT, distinctive_features TEXT,
+                    clothing_description TEXT, jewelry_description TEXT, person_description TEXT,
+                    found_latitude REAL, found_longitude REAL, found_address TEXT,
+                    profile_photo TEXT, extra_photos TEXT,
+                    cause_of_death TEXT, estimated_death_time TEXT, postmortem_report_url TEXT,
+                    dna_sample_collected INTEGER DEFAULT 0,
+                    dental_records_available INTEGER DEFAULT 0,
+                    fingerprints_collected INTEGER DEFAULT 0,
+                    additional_notes TEXT,
+                    status TEXT DEFAULT 'Open',
+                    created_at TEXT DEFAULT (datetime('now')),
+                    updated_at TEXT DEFAULT (datetime('now'))
+                );
+                CREATE TABLE IF NOT EXISTS preliminary_uidb_reports (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    pid TEXT UNIQUE NOT NULL,
+                    report_number TEXT NOT NULL,
+                    police_station TEXT NOT NULL,
+                    reported_date TEXT NOT NULL DEFAULT (datetime('now')),
+                    found_date TEXT NOT NULL,
+                    estimated_age INTEGER,
+                    gender TEXT CHECK (gender IN ('Male', 'Female', 'Other', 'Unknown')),
+                    height_cm INTEGER, build TEXT, hair_color TEXT, eye_color TEXT,
+                    distinguishing_marks TEXT, clothing_description TEXT, person_description TEXT,
+                    found_latitude REAL, found_longitude REAL, found_address TEXT,
+                    profile_photo TEXT, extra_photos TEXT, initial_notes TEXT,
+                    status TEXT DEFAULT 'Pending',
+                    uidb_id INTEGER,
+                    created_at TEXT DEFAULT (datetime('now')),
+                    updated_at TEXT DEFAULT (datetime('now')),
+                    FOREIGN KEY (uidb_id) REFERENCES unidentified_bodies(id)
+                );
+            ''')
+            print(f"✓ Database created with inline schema: {DB_FILE}")
+        conn.close()
+
+ensure_database_schema()
+
 
 # Initialize services
 db_helper = DatabaseHelper()
@@ -160,7 +247,7 @@ def save_upload_file(upload_file: UploadFile, destination: str) -> str:
             shutil.copyfileobj(upload_file.file, buffer)
         return destination
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to save file: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to save file")
 
 
 def generate_text_description(data: dict) -> str:
@@ -226,6 +313,15 @@ def get_record_details(pid: str) -> dict:
     
     conn.close()
     return record
+
+
+def _cleanup_temp_file(path):
+    """Safely remove a temp file"""
+    if path and os.path.exists(path):
+        try:
+            os.remove(path)
+        except Exception:
+            pass
 
 
 # ============================================================================
@@ -319,14 +415,14 @@ async def report_unidentified_body(
     Report a new unidentified body
     Adds record to database and vector database
     """
+    temp_photo_path = f"temp_{uuid.uuid4()}.jpg"
     try:
         # Save photo temporarily
-        temp_photo_path = f"temp_{uuid.uuid4()}.jpg"
         save_upload_file(profile_photo, temp_photo_path)
         
         # Prepare data dictionary for db_helper
         data = {
-            'case_number': f"CASE-AUTO-{datetime.now().strftime('%Y%m%d%H%M%S')}",
+            'case_number': f"CASE-{datetime.now().strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:6]}",
             'police_station': police_station,
             'reported_date': found_date,
             'found_date': found_date,
@@ -375,8 +471,7 @@ async def report_unidentified_body(
         conn.close()
         
         # Clean up temp file
-        if os.path.exists(temp_photo_path):
-            os.remove(temp_photo_path)
+        _cleanup_temp_file(temp_photo_path)
         
         # Get the saved photo path
         record = get_record_details(pid)
@@ -385,66 +480,68 @@ async def report_unidentified_body(
         # Generate embeddings and add to vector DB
         embeddings_added = []
         
+        # Build metadata (defined here so face embedding block can use it too)
+        metadata = {
+            "pid": pid,
+            "record_type": "unidentified_body",
+            "gender": gender,
+            "estimated_age": estimated_age,
+            "height_cm": height_cm,
+            "build": build,
+            "complexion": complexion,
+            "face_shape": face_shape,
+            "hair_color": hair_color,
+            "eye_color": eye_color,
+            "distinguishing_marks": distinguishing_marks,
+            "distinctive_features": distinctive_features,
+            "clothing_description": clothing_description,
+            "found_address": found_address,
+            "police_station": police_station,
+            "found_date": found_date,
+            "status": "Open",
+        }
+        metadata = {k: v for k, v in metadata.items() if v is not None}
+        
         # 1. Text embedding
-        try:
-            data_dict = {
-                'gender': gender,
-                'estimated_age': estimated_age,
-                'height_cm': height_cm,
-                'build': build,
-                'complexion': complexion,
-                'face_shape': face_shape,
-                'hair_color': hair_color,
-                'eye_color': eye_color,
-                'distinguishing_marks': distinguishing_marks,
-                'distinctive_features': distinctive_features,
-                'clothing_description': clothing_description,
-                'jewelry_description': jewelry_description,
-                'person_description': person_description,
-                'found_address': found_address
-            }
-            
-            text_description = generate_text_description(data_dict)
-            text_embedding = text_embedder.get_embedding(text_description)
-            
-            metadata = {
-                "pid": pid,
-                "record_type": "unidentified_body",
-                "gender": gender,
-                "estimated_age": estimated_age,
-                "height_cm": height_cm,
-                "build": build,
-                "complexion": complexion,
-                "face_shape": face_shape,
-                "hair_color": hair_color,
-                "eye_color": eye_color,
-                "distinguishing_marks": distinguishing_marks,
-                "distinctive_features": distinctive_features,
-                "clothing_description": clothing_description,
-                "found_address": found_address,
-                "police_station": police_station,
-                "found_date": found_date,
-                "status": "Open",
-                "description": text_description
-            }
-            metadata = {k: v for k, v in metadata.items() if v is not None}
-            
-            point = PointStruct(
-                id=db_id,
-                vector=text_embedding.tolist(),
-                payload=metadata
-            )
-            qdrant_client.upsert(
-                collection_name="text_embeddings",
-                points=[point]
-            )
-            embeddings_added.append("text")
-            
-        except Exception as e:
-            print(f"Warning: Failed to add text embedding: {e}")
+        if TEXT_EMBEDDER_AVAILABLE and text_embedder and QDRANT_AVAILABLE and qdrant_client:
+            try:
+                data_dict = {
+                    'gender': gender,
+                    'estimated_age': estimated_age,
+                    'height_cm': height_cm,
+                    'build': build,
+                    'complexion': complexion,
+                    'face_shape': face_shape,
+                    'hair_color': hair_color,
+                    'eye_color': eye_color,
+                    'distinguishing_marks': distinguishing_marks,
+                    'distinctive_features': distinctive_features,
+                    'clothing_description': clothing_description,
+                    'jewelry_description': jewelry_description,
+                    'person_description': person_description,
+                    'found_address': found_address
+                }
+                
+                text_description = generate_text_description(data_dict)
+                text_embedding = text_embedder.get_embedding(text_description)
+                metadata["description"] = text_description
+                
+                point = PointStruct(
+                    id=db_id,
+                    vector=text_embedding.tolist(),
+                    payload=metadata
+                )
+                qdrant_client.upsert(
+                    collection_name="text_embeddings",
+                    points=[point]
+                )
+                embeddings_added.append("text")
+                
+            except Exception as e:
+                print(f"Warning: Failed to add text embedding: {e}")
         
         # 2. Face embedding
-        if FACE_RECOGNITION_AVAILABLE and record and photo_path:
+        if FACE_RECOGNITION_AVAILABLE and QDRANT_AVAILABLE and qdrant_client and record and photo_path:
             try:
                 full_photo_path = photo_path if os.path.isabs(photo_path) else os.path.join(os.getcwd(), photo_path)
                 
@@ -476,8 +573,13 @@ async def report_unidentified_body(
             }
         }
         
+    except HTTPException:
+        _cleanup_temp_file(temp_photo_path)
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to create report: {str(e)}")
+        _cleanup_temp_file(temp_photo_path)
+        print(f"Error creating unidentified body report: {e}")
+        raise HTTPException(status_code=500, detail="Failed to create report")
 
 
 @app.post("/api/report-missing-person")
@@ -506,10 +608,10 @@ async def report_missing_person(
 ):
     """
     Report a new missing person
-    Adds record to database
+    Adds record to database and vector database
     """
+    temp_photo_path = None
     try:
-        temp_photo_path = None
         if profile_photo:
             temp_photo_path = f"temp_{uuid.uuid4()}.jpg"
             save_upload_file(profile_photo, temp_photo_path)
@@ -546,21 +648,105 @@ async def report_missing_person(
         if not pid:
             raise Exception("Failed to add record to database")
 
-        if temp_photo_path and os.path.exists(temp_photo_path):
-            os.remove(temp_photo_path)
+        _cleanup_temp_file(temp_photo_path)
+
+        # --- Vector indexing for missing persons ---
+        embeddings_added = []
+        
+        if TEXT_EMBEDDER_AVAILABLE and text_embedder and QDRANT_AVAILABLE and qdrant_client:
+            try:
+                # Get the database ID
+                conn = sqlite3.connect(DB_FILE)
+                cursor = conn.cursor()
+                cursor.execute("SELECT id FROM missing_persons WHERE pid = ?", (pid,))
+                result = cursor.fetchone()
+                db_id = result[0] if result else None
+                conn.close()
+                
+                if db_id:
+                    data_dict = {
+                        'gender': gender,
+                        'age': age,
+                        'height_cm': height_cm,
+                        'build': build,
+                        'hair_color': hair_color,
+                        'eye_color': eye_color,
+                        'distinguishing_marks': distinguishing_marks,
+                        'clothing_description': clothing_description,
+                        'person_description': person_description,
+                        'last_seen_address': last_seen_address
+                    }
+                    
+                    text_description = generate_text_description(data_dict)
+                    text_embedding = text_embedder.get_embedding(text_description)
+                    
+                    metadata = {
+                        "pid": pid,
+                        "record_type": "missing_person",
+                        "gender": gender,
+                        "estimated_age": age,
+                        "height_cm": height_cm,
+                        "build": build,
+                        "hair_color": hair_color,
+                        "eye_color": eye_color,
+                        "distinguishing_marks": distinguishing_marks,
+                        "clothing_description": clothing_description,
+                        "police_station": police_station,
+                        "reported_date": reported_date,
+                        "status": "Open",
+                        "description": text_description,
+                        "name": name,
+                    }
+                    metadata = {k: v for k, v in metadata.items() if v is not None}
+                    
+                    point = PointStruct(
+                        id=db_id,
+                        vector=text_embedding.tolist(),
+                        payload=metadata
+                    )
+                    qdrant_client.upsert(
+                        collection_name="text_embeddings",
+                        points=[point]
+                    )
+                    embeddings_added.append("text")
+                    
+                    # Face embedding if photo provided
+                    if FACE_RECOGNITION_AVAILABLE:
+                        record = get_record_details(pid)
+                        photo_path = record.get('profile_photo', '') if record else ''
+                        if photo_path:
+                            full_photo_path = photo_path if os.path.isabs(photo_path) else os.path.join(os.getcwd(), photo_path)
+                            if os.path.exists(full_photo_path):
+                                face_embedding = face_extractor.extract_embedding(full_photo_path, return_normalized=True)
+                                point = PointStruct(
+                                    id=db_id,
+                                    vector=face_embedding.tolist(),
+                                    payload=metadata
+                                )
+                                qdrant_client.upsert(
+                                    collection_name="face_embeddings",
+                                    points=[point]
+                                )
+                                embeddings_added.append("face")
+            except Exception as e:
+                print(f"Warning: Failed to add embeddings for missing person: {e}")
 
         return {
             "status": "success",
             "message": "Missing person report created successfully",
             "data": {
-                "pid": pid
+                "pid": pid,
+                "embeddings_added": embeddings_added
             }
         }
 
+    except HTTPException:
+        _cleanup_temp_file(temp_photo_path)
+        raise
     except Exception as e:
-        if temp_photo_path and os.path.exists(temp_photo_path):
-            os.remove(temp_photo_path)
-        raise HTTPException(status_code=500, detail=f"Failed to create report: {str(e)}")
+        _cleanup_temp_file(temp_photo_path)
+        print(f"Error creating missing person report: {e}")
+        raise HTTPException(status_code=500, detail="Failed to create report")
 
 
 @app.post("/api/search-missing-person")
@@ -594,7 +780,7 @@ async def search_missing_person(
                 temp_photo_path = f"temp_{uuid.uuid4()}.jpg"
                 save_upload_file(photo, temp_photo_path)
                 face_embedding = face_extractor.extract_embedding(temp_photo_path, return_normalized=True)
-                os.remove(temp_photo_path)
+                _cleanup_temp_file(temp_photo_path)
             except Exception as e:
                 print(f"Warning: Failed to extract face embedding: {e}")
         
@@ -615,15 +801,22 @@ async def search_missing_person(
             }
             description = generate_text_description(data_dict)
         
-        try:
-            text_embedding = text_embedder.get_embedding(description)
-        except Exception as e:
-            print(f"Warning: Failed to generate text embedding: {e}")
+        if TEXT_EMBEDDER_AVAILABLE and text_embedder:
+            try:
+                text_embedding = text_embedder.get_embedding(description)
+            except Exception as e:
+                print(f"Warning: Failed to generate text embedding: {e}")
         
         if face_embedding is None and text_embedding is None:
             raise HTTPException(
                 status_code=400,
                 detail="No valid embeddings generated. Provide either a photo or text description."
+            )
+        
+        if not QDRANT_AVAILABLE or not vector_retrieval:
+            raise HTTPException(
+                status_code=503,
+                detail="Vector search service is not available."
             )
         
         search_results = vector_retrieval.search_and_combine(
@@ -649,7 +842,7 @@ async def search_missing_person(
                 if record_details.get('extra_photos'):
                     try:
                         record_details['extra_photos'] = json.loads(record_details['extra_photos'])
-                    except:
+                    except Exception:
                         pass
                 
                 enriched_results.append({
@@ -676,7 +869,8 @@ async def search_missing_person(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
+        print(f"Search error: {e}")
+        raise HTTPException(status_code=500, detail="Search failed")
 
 
 @app.get("/api/record/{pid}")
@@ -691,7 +885,7 @@ async def get_record(pid: str):
         if record.get('extra_photos'):
             try:
                 record['extra_photos'] = json.loads(record['extra_photos'])
-            except:
+            except Exception:
                 pass
         
         return {
@@ -702,7 +896,8 @@ async def get_record(pid: str):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch record: {str(e)}")
+        print(f"Error fetching record: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch record")
 
 
 @app.get("/api/stats")
@@ -726,17 +921,20 @@ async def get_statistics():
         
         conn.close()
         
-        try:
-            text_collection = qdrant_client.get_collection("text_embeddings")
-            text_count = text_collection.points_count
-        except:
-            text_count = 0
-        
-        try:
-            face_collection = qdrant_client.get_collection("face_embeddings")
-            face_count = face_collection.points_count
-        except:
-            face_count = 0
+        text_count = 0
+        face_count = 0
+        if qdrant_client:
+            try:
+                text_collection = qdrant_client.get_collection("text_embeddings")
+                text_count = text_collection.points_count
+            except Exception:
+                pass
+            
+            try:
+                face_collection = qdrant_client.get_collection("face_embeddings")
+                face_count = face_collection.points_count
+            except Exception:
+                pass
         
         return {
             "status": "success",
@@ -755,7 +953,8 @@ async def get_statistics():
         }
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch statistics: {str(e)}")
+        print(f"Error fetching statistics: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch statistics")
 
 
 @app.get("/api/unidentified-bodies")
@@ -784,7 +983,8 @@ async def get_all_unidentified_bodies():
         }
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch records: {str(e)}")
+        print(f"Error fetching records: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch records")
 
 
 @app.get("/api/missing-persons")
@@ -813,7 +1013,17 @@ async def get_all_missing_persons():
         }
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch records: {str(e)}")
+        print(f"Error fetching records: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch records")
+
+
+@app.get("/photos/{file_path:path}")
+async def serve_photo(file_path: str):
+    """Serve uploaded photos"""
+    full_path = os.path.join(PHOTO_BASE_DIR, file_path)
+    if not os.path.exists(full_path):
+        raise HTTPException(status_code=404, detail="Photo not found")
+    return FileResponse(full_path)
 
 
 # ============================================================================
@@ -822,6 +1032,9 @@ async def get_all_missing_persons():
 
 if __name__ == "__main__":
     import uvicorn
+    
+    host = os.environ.get("API_HOST", "0.0.0.0")
+    port = int(os.environ.get("API_PORT", "8000"))
     
     print("\n" + "="*70)
     print("Starting Missing Persons & Unidentified Bodies API")
@@ -833,8 +1046,8 @@ if __name__ == "__main__":
     
     uvicorn.run(
         app,
-        host="0.0.0.0",
-        port=8000,
+        host=host,
+        port=port,
         reload=False,
         log_level="info"
     )

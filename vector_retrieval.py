@@ -8,11 +8,6 @@ from qdrant_client.models import Filter, FieldCondition, MatchValue, Range
 import numpy as np
 from typing import List, Dict, Optional, Tuple
 from concurrent.futures import ThreadPoolExecutor
-import os
-from dotenv import load_dotenv
-
-# Load environment variables
-load_dotenv()
 
 
 class VectorRetrieval:
@@ -73,7 +68,7 @@ class VectorRetrieval:
                 age_range["lte"] = age_max
             
             must_conditions.append(
-                FieldCondition(key="age", range=Range(**age_range))
+                FieldCondition(key="estimated_age", range=Range(**age_range))
             )
         
         # Height filter (range)
@@ -148,7 +143,7 @@ class VectorRetrieval:
         Search text embeddings collection.
         
         Args:
-            query_embedding: Text embedding vector (1536 dimensions)
+            query_embedding: Text embedding vector (768 dimensions)
             limit: Maximum number of results
             metadata_filter: Metadata filter for search
             
@@ -433,7 +428,7 @@ if __name__ == "__main__":
         
         # Example: Create dummy embeddings (replace with actual embeddings)
         face_emb = np.random.rand(512)  # Replace with actual face embedding
-        text_emb = np.random.rand(1536)  # Replace with actual text embedding
+        text_emb = np.random.rand(768)  # Replace with actual text embedding
         
         # Example 1: Search with metadata filters
         print("\n--- Example 1: Search with Metadata Filters ---")

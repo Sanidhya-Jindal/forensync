@@ -1,4 +1,17 @@
+# FastAPI and Web Server
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+python-multipart==0.0.18
+
+# Database
 python-dotenv==1.0.1
+
+# Vector Database
 qdrant-client==1.12.1
-openai==1.57.4
+
+# AI/ML - Text Processing
+sentence-transformers==3.3.1
+
+# Utilities
 numpy==1.26.4
+pillow==11.0.0

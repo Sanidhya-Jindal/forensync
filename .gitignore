@@ -6,6 +6,7 @@ __pycache__/
 .Python
 env/
 venv/
+.venv/
 ENV/
 *.egg-info/
 dist/
@@ -17,9 +18,27 @@ build/
 # Photos (sensitive data)
 photos/
 
+# Database
+*.db
+qdrant_data/
+
 # Database backups
 *.sql.backup
 *.dump
+
+# Temp files
+temp_*.jpg
+temp_*.png
+
+# Binaries
+*.msix
+
+# Node
+node_modules/
+
+# Sample data directories
+sample dead/
+sample missing/
 
 # IDE
 .vscode/

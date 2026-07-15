@@ -12,53 +12,41 @@ import shutil
 # Database configuration
 DB_FILE = 'missing_persons.db'  # SQLite database file
 
+# Whitelist of valid table names to prevent SQL injection
+VALID_TABLES = {'missing_persons', 'unidentified_bodies', 'preliminary_uidb_reports'}
+
 
 class DatabaseHelper:
-    """Helper class for database operations"""
+    """Helper class for database operations — thread-safe (new connection per call)"""
     
     def __init__(self, db_file=None):
-        """Initialize database connection"""
+        """Initialize database helper"""
         self.db_file = db_file or DB_FILE
-        self.conn = None
-        self.cursor = None
     
-    def connect(self):
-        """Connect to the database"""
-        try:
-            self.conn = sqlite3.connect(self.db_file)
-            self.conn.row_factory = sqlite3.Row  # Return rows as dictionaries
-            self.cursor = self.conn.cursor()
-            return True
-        except sqlite3.Error as e:
-            print(f"Database connection error: {e}")
-            return False
-    
-    def _ensure_connected(self):
-        """Ensure database connection is active, auto-connect if needed"""
-        if self.conn is None or self.cursor is None:
-            self.connect()
-    
-    def disconnect(self):
-        """Disconnect from the database"""
-        if self.cursor:
-            self.cursor.close()
-        if self.conn:
-            self.conn.close()
+    def _get_connection(self):
+        """Create a new database connection (thread-safe)"""
+        conn = sqlite3.connect(self.db_file)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    def _validate_table_name(self, table_name):
+        """Validate table name against whitelist to prevent SQL injection"""
+        if table_name not in VALID_TABLES:
+            raise ValueError(f"Invalid table name: {table_name}")
     
     def __enter__(self):
         """Context manager entry"""
-        self.connect()
         return self
     
     def __exit__(self, exc_type, exc_val, exc_tb):
         """Context manager exit"""
-        self.disconnect()
+        pass
     
     # Missing Persons Operations
     
     def generate_pid(self, table_name):
         """Generate unique PID for a table"""
-        self._ensure_connected()
+        self._validate_table_name(table_name)
         prefix_map = {
             'missing_persons': 'MP',
             'unidentified_bodies': 'UIDB',
@@ -68,24 +56,27 @@ class DatabaseHelper:
         prefix = prefix_map.get(table_name, 'UNK')
         year = datetime.now().year
         
-        # Get the latest ID for this year - SQLite uses ? placeholders
-        query = f"""
-            SELECT pid FROM {table_name} 
-            WHERE pid LIKE ? 
-            ORDER BY pid DESC 
-            LIMIT 1
-        """
-        self.cursor.execute(query, (f'{prefix}-{year}-%',))
-        result = self.cursor.fetchone()
-        
-        if result:
-            # Extract the number and increment
-            last_num = int(result['pid'].split('-')[-1])
-            new_num = last_num + 1
-        else:
-            new_num = 1
-        
-        return f"{prefix}-{year}-{new_num:05d}"
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            query = f"""
+                SELECT pid FROM {table_name} 
+                WHERE pid LIKE ? 
+                ORDER BY pid DESC 
+                LIMIT 1
+            """
+            cursor.execute(query, (f'{prefix}-{year}-%',))
+            result = cursor.fetchone()
+            
+            if result:
+                last_num = int(result['pid'].split('-')[-1])
+                new_num = last_num + 1
+            else:
+                new_num = 1
+            
+            return f"{prefix}-{year}-{new_num:05d}"
+        finally:
+            conn.close()
     
     def create_person_folder(self, table_name, pid):
         """Create folder structure for a person's photos"""
@@ -146,8 +137,11 @@ class DatabaseHelper:
         Returns:
             The generated PID if successful, None otherwise
         """
+        conn = self._get_connection()
         try:
-            self._ensure_connected()
+            data = dict(data)  # Don't mutate caller's dict
+            cursor = conn.cursor()
+            
             # Generate PID
             pid = self.generate_pid('missing_persons')
             
@@ -193,21 +187,26 @@ class DatabaseHelper:
                 data['reporter_contact'], data['additional_notes'], data['status']
             )
             
-            self.cursor.execute(query, values)
-            self.conn.commit()
+            cursor.execute(query, values)
+            conn.commit()
             
             print(f"✓ Missing person added with PID: {pid}")
             return pid
             
         except sqlite3.Error as e:
-            self.conn.rollback()
+            if conn:
+                conn.rollback()
             print(f"Error adding missing person: {e}")
             return None
+        finally:
+            conn.close()
     
     def add_preliminary_uidb(self, data, profile_photo_path=None, extra_photo_paths=None):
         """Add a new preliminary UIDB report"""
+        conn = self._get_connection()
         try:
-            self._ensure_connected()
+            data = dict(data)  # Don't mutate caller's dict
+            cursor = conn.cursor()
             pid = self.generate_pid('preliminary_uidb_reports')
             
             # Handle photos
@@ -248,21 +247,26 @@ class DatabaseHelper:
                 data['extra_photos'], data['initial_notes'], data['status']
             )
             
-            self.cursor.execute(query, values)
-            self.conn.commit()
+            cursor.execute(query, values)
+            conn.commit()
             
             print(f"✓ Preliminary UIDB report added with PID: {pid}")
             return pid
             
         except sqlite3.Error as e:
-            self.conn.rollback()
+            if conn:
+                conn.rollback()
             print(f"Error adding preliminary UIDB: {e}")
             return None
+        finally:
+            conn.close()
     
     def add_unidentified_body(self, data, profile_photo_path=None, extra_photo_paths=None):
         """Add a new unidentified body record"""
+        conn = self._get_connection()
         try:
-            self._ensure_connected()
+            data = dict(data)  # Don't mutate caller's dict
+            cursor = conn.cursor()
             pid = self.generate_pid('unidentified_bodies')
             
             # Handle photos
@@ -312,29 +316,35 @@ class DatabaseHelper:
                 data.get('fingerprints_collected'), data.get('additional_notes'), data.get('status', 'Open')
             )
             
-            self.cursor.execute(query, values)
-            self.conn.commit()
+            cursor.execute(query, values)
+            conn.commit()
             
             print(f"✓ Unidentified body added with PID: {pid}")
             return pid
             
         except sqlite3.Error as e:
-            if self.conn:
-                self.conn.rollback()
+            if conn:
+                conn.rollback()
             print(f"Error adding unidentified body: {e}")
             return None
+        finally:
+            conn.close()
     
     def get_by_pid(self, table_name, pid):
         """Get a record by PID"""
+        self._validate_table_name(table_name)
+        conn = self._get_connection()
         try:
-            self._ensure_connected()
+            cursor = conn.cursor()
             query = f"SELECT * FROM {table_name} WHERE pid = ?"
-            self.cursor.execute(query, (pid,))
-            row = self.cursor.fetchone()
+            cursor.execute(query, (pid,))
+            row = cursor.fetchone()
             return dict(row) if row else None
         except sqlite3.Error as e:
             print(f"Error fetching record: {e}")
             return None
+        finally:
+            conn.close()
     
     def search_records(self, table_name, filters=None, limit=100):
         """
@@ -348,41 +358,61 @@ class DatabaseHelper:
         Returns:
             List of matching records
         """
+        self._validate_table_name(table_name)
+        
+        # Whitelist of allowed filter fields
+        allowed_fields = {
+            'pid', 'gender', 'status', 'police_station', 'build',
+            'hair_color', 'eye_color', 'complexion', 'face_shape',
+            'fir_number', 'name', 'case_number'
+        }
+        
+        conn = self._get_connection()
         try:
-            self._ensure_connected()
+            cursor = conn.cursor()
             query = f"SELECT * FROM {table_name}"
             params = []
             
             if filters:
                 conditions = []
                 for field, value in filters.items():
+                    if field not in allowed_fields:
+                        continue  # Skip invalid field names
                     conditions.append(f"{field} = ?")
                     params.append(value)
-                query += " WHERE " + " AND ".join(conditions)
+                if conditions:
+                    query += " WHERE " + " AND ".join(conditions)
             
-            query += f" ORDER BY created_at DESC LIMIT {limit}"
+            query += " ORDER BY created_at DESC LIMIT ?"
+            params.append(int(limit))
             
-            self.cursor.execute(query, params)
-            rows = self.cursor.fetchall()
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
             return [dict(row) for row in rows]
             
         except sqlite3.Error as e:
             print(f"Error searching records: {e}")
             return []
+        finally:
+            conn.close()
     
     def update_status(self, table_name, pid, new_status):
         """Update the status of a record"""
+        self._validate_table_name(table_name)
+        conn = self._get_connection()
         try:
-            self._ensure_connected()
+            cursor = conn.cursor()
             query = f"UPDATE {table_name} SET status = ? WHERE pid = ?"
-            self.cursor.execute(query, (new_status, pid))
-            self.conn.commit()
+            cursor.execute(query, (new_status, pid))
+            conn.commit()
             print(f"✓ Status updated for {pid}: {new_status}")
             return True
         except sqlite3.Error as e:
-            self.conn.rollback()
+            conn.rollback()
             print(f"Error updating status: {e}")
             return False
+        finally:
+            conn.close()
 
 
 # Example usage
