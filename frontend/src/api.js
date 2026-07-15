@@ -33,10 +33,13 @@ export const apiService = {
   getMissingPerson: (pid) => api.get(`/api/record/${pid}`),
 
   // Search
-  searchMatch: (params) => api.post('/api/search-missing-person', params),
+  searchMatch: (formData) => api.post('/api/search-missing-person', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  }),
   searchByImage: (formData) => api.post('/api/search-missing-person', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
   }),
 };
 
+export { api };
 export default api;
