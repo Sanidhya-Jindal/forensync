@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { apiService } from '../api';
+import { assetUrl } from '../utils';
 
 function SearchMatch() {
   const navigate = useNavigate();
@@ -12,11 +13,19 @@ function SearchMatch() {
   const [searching, setSearching] = useState(false);
   const [error, setError] = useState('');
 
+  // Revoke previous blob URL whenever photo changes to prevent memory leak
+  useEffect(() => {
+    if (!photo) return;
+    const objectUrl = URL.createObjectURL(photo);
+    setPhotoPreview(objectUrl);
+    return () => URL.revokeObjectURL(objectUrl);
+  }, [photo]);
+
   const handlePhotoChange = (e) => {
     const file = e.target.files[0];
     if (file) {
       setPhoto(file);
-      setPhotoPreview(URL.createObjectURL(file));
+      // Preview is handled by the effect above
     }
   };
 
@@ -168,7 +177,7 @@ function ResultCard({ result }) {
           {result.photo_path && (
             <div className="w-16 h-16 rounded-lg overflow-hidden relative group-hover:scale-110 transition-transform duration-300" style={{ backgroundColor: '#1A1A1A' }}>
               <img 
-                src={`http://localhost:8000/${result.photo_path}`} 
+                src={assetUrl(result.photo_path)}
                 alt="Match"
                 className="w-full h-full object-cover"
                 onError={(e) => e.target.style.display = 'none'}
