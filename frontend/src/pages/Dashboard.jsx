@@ -38,7 +38,7 @@ function StatusPill({ status }) {
   return <span className={joinClasses('rounded-full px-3 py-1 text-xs font-medium', classes[tone] || classes.default)}>{status || 'Open'}</span>;
 }
 
-export function Dashboard() {
+export default function Dashboard() {
   const { stats, health, recentRecords, openRecord } = useApp();
   const databaseStats = stats?.database || {};
   const vectorStats = stats?.vector_database || {};

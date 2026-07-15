@@ -28,7 +28,7 @@ function BoolPill({ value }) {
   );
 }
 
-export function RecordDrawer() {
+export default function RecordDrawer() {
   const { drawerOpen, drawerLoading, drawerRecord, drawerError, closeDrawer } = useApp();
 
   if (!drawerOpen) return null;

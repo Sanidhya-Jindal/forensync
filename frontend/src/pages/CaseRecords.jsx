@@ -17,7 +17,7 @@ function StatusBadge({ status }) {
   return <span className={joinClasses('rounded-full px-3 py-1 text-xs font-medium', classes[tone] || classes.default)}>{status || 'Open'}</span>;
 }
 
-export function CaseRecords() {
+export default function CaseRecords() {
   const { recentRecords, addToast, openRecord, rememberRecord } = useApp();
   const [typeFilter, setTypeFilter] = useState('unidentified_body');
   const [searchQuery, setSearchQuery] = useState('');

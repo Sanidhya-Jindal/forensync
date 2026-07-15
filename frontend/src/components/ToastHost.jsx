@@ -15,7 +15,7 @@ const toneIcons = {
   info: Info,
 };
 
-export function ToastHost() {
+export default function ToastHost() {
   const { toasts, removeToast } = useApp();
 
   return (
