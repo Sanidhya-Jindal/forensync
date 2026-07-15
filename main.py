@@ -240,14 +240,56 @@ class SearchResult(BaseModel):
 # UTILITY FUNCTIONS
 # ============================================================================
 
+MAX_UPLOAD_SIZE = 10 * 1024 * 1024  # 10 MB
+ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp", "image/bmp"}
+
+
+def validate_upload_file(upload_file: UploadFile) -> None:
+    """Validate uploaded file type and size before saving"""
+    # Check content type
+    content_type = upload_file.content_type or ""
+    if content_type not in ALLOWED_IMAGE_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid file type: {content_type}. Allowed: JPEG, PNG, GIF, WebP, BMP"
+        )
+    # Check file size (read into memory, then reset)
+    upload_file.file.seek(0, 2)  # Seek to end
+    file_size = upload_file.file.tell()
+    upload_file.file.seek(0)  # Reset to beginning
+    if file_size > MAX_UPLOAD_SIZE:
+        raise HTTPException(
+            status_code=400,
+            detail=f"File too large ({file_size // (1024*1024)}MB). Maximum: {MAX_UPLOAD_SIZE // (1024*1024)}MB"
+        )
+
+
 def save_upload_file(upload_file: UploadFile, destination: str) -> str:
-    """Save uploaded file to destination"""
+    """Validate and save uploaded file to destination"""
+    validate_upload_file(upload_file)
     try:
         with open(destination, "wb") as buffer:
             shutil.copyfileobj(upload_file.file, buffer)
         return destination
     except Exception as e:
         raise HTTPException(status_code=500, detail="Failed to save file")
+
+
+def validate_date_field(value: str, field_name: str) -> str:
+    """Validate and return a date string, raising 400 if invalid"""
+    if not value:
+        return value
+    # Accept ISO datetime (2024-01-15T10:30) or date-only (2024-01-15)
+    for fmt in ("%Y-%m-%dT%H:%M", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d"):
+        try:
+            datetime.strptime(value, fmt)
+            return value
+        except ValueError:
+            continue
+    raise HTTPException(
+        status_code=400,
+        detail=f"Invalid date format for '{field_name}': '{value}'. Expected YYYY-MM-DD or YYYY-MM-DDTHH:MM"
+    )
 
 
 def generate_text_description(data: dict) -> str:
@@ -417,6 +459,13 @@ async def report_unidentified_body(
     """
     temp_photo_path = f"temp_{uuid.uuid4()}.jpg"
     try:
+        # Validate date fields
+        found_date = validate_date_field(found_date, "found_date")
+        if postmortem_date:
+            postmortem_date = validate_date_field(postmortem_date, "postmortem_date")
+        if estimated_death_time:
+            estimated_death_time = validate_date_field(estimated_death_time, "estimated_death_time")
+        
         # Save photo temporarily
         save_upload_file(profile_photo, temp_photo_path)
         
@@ -612,6 +661,11 @@ async def report_missing_person(
     """
     temp_photo_path = None
     try:
+        # Validate date fields
+        reported_date = validate_date_field(reported_date, "reported_date")
+        if last_seen_date:
+            last_seen_date = validate_date_field(last_seen_date, "last_seen_date")
+        
         if profile_photo:
             temp_photo_path = f"temp_{uuid.uuid4()}.jpg"
             save_upload_file(profile_photo, temp_photo_path)

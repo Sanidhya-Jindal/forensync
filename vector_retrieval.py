@@ -363,26 +363,11 @@ class VectorRetrieval:
         Returns:
             List of top N results with combined scores
         """
-        print(f"\n{'='*60}")
-        print("Vector Retrieval Search")
-        print(f"{'='*60}\n")
-        
         # Validate inputs
         if face_embedding is None and text_embedding is None:
             raise ValueError("At least one embedding (face or text) must be provided")
         
-        # Display search parameters
-        has_filters = any([gender, age_min, age_max, height_min, height_max])
-        print("Search Parameters:")
-        if has_filters:
-            print(f"  - Metadata Filters: gender={gender}, age=[{age_min}-{age_max}], height=[{height_min}-{height_max}]")
-        else:
-            print(f"  - Metadata Filters: None (searching all records)")
-        print(f"  - Weights: Face={w1:.2f}, Text={w2:.2f}")
-        print(f"  - Top N: {top_n}\n")
-        
         # Parallel search with metadata filters
-        print("Searching collections...")
         face_results, text_results = self.parallel_search(
             face_embedding=face_embedding,
             text_embedding=text_embedding,
@@ -394,11 +379,7 @@ class VectorRetrieval:
             height_max=height_max
         )
         
-        print(f"✓ Face results: {len(face_results)}")
-        print(f"✓ Text results: {len(text_results)}\n")
-        
         # Combine results
-        print("Combining results with weighted scores...")
         combined_results = self.combine_results(
             face_results=face_results,
             text_results=text_results,
@@ -406,8 +387,6 @@ class VectorRetrieval:
             w2=w2,
             top_n=top_n
         )
-        
-        print(f"✓ Top {len(combined_results)} results retrieved\n")
         
         return combined_results
 
