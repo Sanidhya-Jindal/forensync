@@ -31,6 +31,8 @@ function Layout() {
     },
     { to: '/search-match', label: 'Search', hasDropdown: false },
     { to: '/records', label: 'Records', hasDropdown: false },
+    { to: '/dashboard', label: 'Dashboard', hasDropdown: false },
+    { to: '/cases', label: 'Cases', hasDropdown: false },
   ];
 
   return (
@@ -49,11 +51,11 @@ function Layout() {
 
             {/* Nav Items */}
             <div className="flex items-center gap-1">
-              {navItems.map((item, index) => (
+              {navItems.map((item) => (
                 <div
-                  key={index}
+                  key={item.label}
                   className="relative"
-                  onMouseEnter={() => item.hasDropdown && setActiveDropdown(index)}
+                  onMouseEnter={() => item.hasDropdown && setActiveDropdown(item.label)}
                   onMouseLeave={() => setActiveDropdown(null)}
                 >
                   {item.hasDropdown ? (
@@ -64,7 +66,7 @@ function Layout() {
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                         </svg>
                       </button>
-                      {activeDropdown === index && (
+                      {activeDropdown === item.label && (
                         <div className="absolute top-full left-0 mt-1 w-72 rounded-xl shadow-2xl overflow-hidden backdrop-blur-xl" style={{ backgroundColor: 'rgba(38,38,38,0.95)', border: '1px solid rgba(255,255,255,0.1)' }}>
                           {item.items.map((subItem) => (
                             <NavLink
