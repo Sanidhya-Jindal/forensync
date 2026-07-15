@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { apiService } from '../api';
 
@@ -34,11 +34,19 @@ function ReportMissingPerson() {
     setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
+  // Revoke previous blob URL whenever photo changes to prevent memory leak
+  useEffect(() => {
+    if (!photo) return;
+    const objectUrl = URL.createObjectURL(photo);
+    setPhotoPreview(objectUrl);
+    return () => URL.revokeObjectURL(objectUrl);
+  }, [photo]);
+
   const handlePhotoChange = (e) => {
     const file = e.target.files[0];
     if (file) {
       setPhoto(file);
-      setPhotoPreview(URL.createObjectURL(file));
+      // Preview is handled by the effect above
     }
   };
 
