@@ -1,4 +1,4 @@
-import { ArrowRight, Database, Image, MapPin, ShieldAlert, Users } from 'lucide-react';
+import { ArrowRight, Database, Image, ShieldAlert, Users } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { SkeletonCard, SkeletonTable } from '../components/LoadingStates';
 import { formatDateTime, formatNumber, getStatusTone, joinClasses } from '../utils';
