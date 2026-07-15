@@ -9,7 +9,7 @@ export function SystemOffline({ onRetry }) {
         </div>
         <h1 className="font-heading text-2xl font-semibold text-white">System Offline</h1>
         <p className="mt-3 leading-7 text-slate-400">
-          The backend at http://localhost:8000 is unreachable. Verify the FastAPI server is running, then retry.
+          Unable to reach the backend server. Verify the API server is running and accessible, then retry.
         </p>
         <button type="button" onClick={onRetry} className="mt-6 rounded-md bg-teal-600 px-5 py-2.5 font-medium text-white transition hover:bg-teal-500">
           Retry connection
