@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { apiService } from '../api';
+import { useApp } from '../context/AppContext';
 
 function Records() {
   const navigate = useNavigate();
+  const { openRecord } = useApp();
   const [activeTab, setActiveTab] = useState('unidentified');
   const [records, setRecords] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -85,6 +87,7 @@ function Records() {
               key={record.pid} 
               className="card-warp p-4 cursor-pointer group animate-fade-in hover:scale-[1.01]"
               style={{ animationDelay: `${index * 0.05}s` }}
+              onClick={() => openRecord(record.pid)}
             >
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-4">
