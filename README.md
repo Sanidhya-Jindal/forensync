@@ -2,6 +2,12 @@
 
 **Forensic identification system — matches missing persons against unidentified bodies using facial recognition and description similarity.**
 
+### ▶ [Live demo](https://forensync.kindbush-568172cc.uaenorth.azurecontainerapps.io/)
+
+> Hosted on Azure Container Apps and scaled to zero when idle, so the **first request may take ~30–60s** to wake the container and load the models. Subsequent requests are fast.
+>
+> Seeded with 30 unidentified bodies and 2 missing persons. Try **Search → Photo Search**, upload any image from [`photos/unidentified_bodies/`](photos/unidentified_bodies), and search against *Unidentified Bodies* to see facial recognition return the exact match at ~100%.
+
 Police stations record missing persons. Morgues record unidentified bodies. The two rarely get compared, so cases stay open. ForenSync indexes both populations as vectors and cross-searches them: upload a photo of an unidentified body and it ranks the missing persons who look like them, or search by description when no usable photo exists.
 
 ---

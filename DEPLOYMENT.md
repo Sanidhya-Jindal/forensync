@@ -1,130 +1,143 @@
 # Deploying ForenSync
 
-## The one thing to understand first
+**Live:** <https://forensync.kindbush-568172cc.uaenorth.azurecontainerapps.io/>
 
-ForenSync is **not a normal web app**. It loads two AI models (face recognition +
-text embeddings) into memory and needs about **1.5–2.5 GB of RAM**.
-
-That single fact decides where you can host it:
-
-| Host | Free RAM | Works? |
-|---|---|---|
-| **Hugging Face Spaces** | **16 GB (free)** | ✅ **Recommended** |
-| Render free / starter | 512 MB | ❌ Crashes on startup (out of memory) |
-| Railway free trial | ~512 MB | ❌ Same problem |
-| Vercel / Netlify | serverless | ❌ Can't run Python AI models at all |
-| Render **standard** | 2 GB | ✅ but costs ~$25/month |
-
-**Use Hugging Face Spaces.** It's free, it's built for AI apps, and it has more
-than enough memory.
-
-The app is packaged as **one Docker image**: the API and the website run together
-on a single URL. You get one link to give people. No separate frontend to deploy,
-no CORS setup, no environment variables to configure.
+Running on **Azure Container Apps** (UAE North), built by **GitHub Actions**, image published to **GitHub Container Registry**.
 
 ---
 
-## Deploy to Hugging Face Spaces (free)
+## The constraint that drives everything
 
-### 1. Make an account
-Go to <https://huggingface.co/join> and sign up (free).
+ForenSync loads two AI models into memory (InsightFace + sentence-transformers) and needs **~1.5–2.5 GB RAM**. That single fact rules out most free hosting:
 
-### 2. Create a Space
-- Click your avatar → **New Space**
-- **Space name**: `forensync`
-- **License**: pick anything (e.g. MIT)
-- **Space SDK**: choose **Docker** → **Blank**
-- **Hardware**: `CPU basic` (free, 16 GB RAM)
-- **Visibility**: **Public** (so interviewers can open it)
-- Click **Create Space**
+| Host | Verdict |
+|---|---|
+| **Azure Container Apps** (student credit) | ✅ **in use** — enough RAM, free via $100 student credit, no card |
+| Hugging Face Spaces | ❌ Docker/Gradio Spaces now require a paid plan; only Static is free |
+| Render / Railway free | ❌ 512 MB — OOM-killed on startup |
+| Vercel / Netlify | ❌ serverless; cannot host resident AI models |
+| Google Cloud Run | ⚠️ works, but billing setup demanded a ₹3,000 prepayment for Indian debit cards (UPI is not supported for self-serve accounts) |
+| Oracle Cloud Always Free | ⚠️ 24 GB free forever, but ARM capacity in `ap-mumbai-1` is chronically exhausted (`Out of capacity`) |
 
-### 3. Push your code to it
-Hugging Face gives you a git URL. In a terminal, from this project folder:
+**[Azure for Students](https://azure.microsoft.com/free/students)** gives **$100/year and requires no credit card** — a college email is the verification. That's what makes this free.
+
+## Architecture
+
+One image serves both the API and the React app on a single port — no CORS, no second host.
+
+```
+git push ─► GitHub Actions ─► builds Dockerfile ─► ghcr.io (public image)
+                                                        │
+                                                        ▼
+                                            Azure Container Apps pulls & runs
+```
+
+**Why GitHub builds it:** Azure student subscriptions reject ACR Tasks
+(`TasksOperationsNotAllowed`), so `az containerapp up --source .` cannot build in
+the cloud. GitHub Actions is free and unlimited on public repos, so it builds the
+image and Azure just pulls the finished result. Bonus: every push republishes it.
+
+---
+
+## Deploying from scratch
+
+### 1. Build the image
+Push to `main`. [`.github/workflows/build-image.yml`](.github/workflows/build-image.yml)
+builds and publishes `ghcr.io/<owner>/forensync:latest` (~20–25 min; it compiles
+the AI libraries and bakes the models in).
+
+**The package must be public**, or Azure can't pull it:
+`github.com/<owner>?tab=packages` → forensync → Package settings → Danger Zone →
+Change visibility → Public.
+
+Verify anonymous pull works (ghcr returns 401 without a token even when public,
+so test the token flow, not a bare GET):
 
 ```bash
-git add .
-git commit -m "Deploy ForenSync"
-
-# replace YOUR-USERNAME with your Hugging Face username
-git remote add space https://huggingface.co/spaces/YOUR-USERNAME/forensync
-git push space main
+TOKEN=$(curl -s "https://ghcr.io/token?service=ghcr.io&scope=repository:<owner>/forensync:pull" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
+curl -s -H "Authorization: Bearer $TOKEN" https://ghcr.io/v2/<owner>/forensync/tags/list
 ```
 
-If it asks for a password, use an **access token**, not your account password:
-create one at <https://huggingface.co/settings/tokens> (role: **write**) and paste
-that as the password.
+### 2. Deploy on Azure
 
-### 4. Wait for the build
-The Space page shows a **Building** log. The first build takes **10–20 minutes** —
-it installs the AI libraries and downloads the models into the image. That's
-normal and only happens once.
-
-When it says **Running**, your app is live at:
-
-```
-https://YOUR-USERNAME-forensync.hf.space
-```
-
-That's the link you give interviewers.
-
----
-
-## What happens on first startup
-
-The server does this by itself — you don't run any commands:
-
-1. Creates the vector database (it isn't stored in git).
-2. Reads the 32 seeded records from `missing_persons.db`.
-3. Generates the face + text embeddings for them (~30–60 seconds).
-4. Starts serving.
-
-So the deployed site already has **30 unidentified bodies and 2 missing persons**
-with working photo search. Nothing to set up.
-
----
-
-## Things to know (worth saying out loud in an interview)
-
-**Uploads reset.** Free Spaces have a temporary disk. The records you seeded always
-come back (they're in git), but **new reports someone submits will disappear when
-the Space restarts or rebuilds**. That's fine for a demo. To make uploads permanent
-you'd add paid persistent storage, or move to Postgres + object storage + hosted
-Qdrant.
-
-**It sleeps.** A free Space sleeps after ~48 hours with no visitors. The next
-visitor wakes it, which takes ~30 seconds. Open your link an hour before an
-interview so it's warm.
-
-**There is no login.** Anyone with the link can search and submit reports. That's a
-deliberate demo choice — say so if asked, and mention you'd add authentication for
-real use. (An API-key gate already exists in the code: set the `API_KEY`
-environment variable to turn it on.)
-
-**One process only.** The vector database runs inside the app process, so it can't
-scale to multiple workers. Fine for a demo; for real traffic you'd run Qdrant as a
-separate service.
-
----
-
-## Running it locally
+In [Azure Cloud Shell](https://shell.azure.com) (Bash):
 
 ```bash
-python run_server.py
+az extension add --name containerapp --upgrade --yes
+az provider register --namespace Microsoft.App --wait
+az provider register --namespace Microsoft.OperationalInsights --wait
+
+az containerapp env create \
+  --name forensync-env \
+  --resource-group forensync-rg \
+  --location uaenorth
+
+az containerapp create \
+  --name forensync \
+  --resource-group forensync-rg \
+  --environment forensync-env \
+  --image ghcr.io/<owner>/forensync:latest \
+  --target-port 8000 \
+  --ingress external \
+  --cpu 2 --memory 4Gi \
+  --min-replicas 0 --max-replicas 1 \
+  --query "properties.configuration.ingress.fqdn" -o tsv
 ```
 
-Then open <http://localhost:8000>. `run_server.py` restarts the API automatically
-if it crashes and appends logs to `server.log` (crash tracebacks land in
-`server_crash.log`).
+| Flag | Why |
+|---|---|
+| `--cpu 2 --memory 4Gi` | The default 1 GiB is not enough — the container is OOM-killed |
+| `--min-replicas 0` | Scale to zero: costs ~nothing idle, so $100 lasts the year |
+| `--target-port 8000` | Must match `EXPOSE`/`PORT` in the Dockerfile |
 
-To rebuild the website after changing frontend code:
+### Region gotcha
+Azure for Students is restricted by an **"Allowed resource deployment regions"**
+policy. Check yours before picking a region:
 
 ```bash
-cd frontend && npm run build
+az policy assignment list --query "[].{policy:displayName, params:parameters}" -o json
+```
+
+This subscription allows only: `centralindia`, `uaenorth`, `austriaeast`,
+`koreacentral`, `malaysiawest`. Central India additionally refused Container App
+Environments (`MaxNumberOfEnvironmentsInSubExceeded`), hence **UAE North**.
+
+### 3. Redeploying after a code change
+
+```bash
+git push                                   # GitHub rebuilds the image
+az containerapp update -n forensync -g forensync-rg \
+  --image ghcr.io/<owner>/forensync:latest # pull the new image
 ```
 
 ---
 
-## Alternative: Render (paid)
+## First startup is automatic
 
-`render.yaml` is set up for a Docker deploy on the **standard** plan (2 GB, ~$25/mo).
-Do not use the free plan — 512 MB is not enough and the service is killed on startup.
+No setup scripts. On boot the app creates the Qdrant collections and, if the
+index is empty, embeds every record in `missing_persons.db` (~30–60s). So a fresh
+deploy comes up already holding 30 unidentified bodies and 2 missing persons with
+working photo search.
+
+## Known limits (worth stating in an interview)
+
+- **Uploads reset.** The container filesystem is ephemeral: seeded records always
+  return (they're in git), but reports submitted at runtime vanish on restart.
+  Fixing it properly means Postgres + object storage + hosted Qdrant.
+- **Cold start.** `--min-replicas 0` means the first hit after idling takes
+  ~30–60s. Set `--min-replicas 1` to keep it warm — it burns credit continuously,
+  which $100/year does not comfortably cover at 2 vCPU.
+- **No authentication**, deliberately. An API-key gate exists: set the `API_KEY`
+  env var to require an `X-API-Key` header on data endpoints.
+- **Single replica.** Qdrant runs embedded and on-disk, so only one process may
+  hold it (`--max-replicas 1`). Scaling out means running Qdrant as a service.
+
+## Running locally
+
+```bash
+pip install -r requirements_production.txt
+cd frontend && npm install && npm run build && cd ..
+python run_server.py     # supervises + restarts on crash; logs to server.log
+```
+
+<http://localhost:8000>
