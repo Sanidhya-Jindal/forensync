@@ -15,6 +15,13 @@ build/
 # Environment variables
 .env
 
+# SSH / private keys — NEVER commit these. Anyone with a private key can log
+# into the server it belongs to.
+ssh key/
+*.key
+*.pem
+id_rsa*
+
 # Photos + database ARE committed: they are the seeded demo data, so a fresh
 # deploy has records and images instead of being empty. (Only sample demo
 # images live here — do not commit real casework photos.)

@@ -37,6 +37,6 @@
 - [x] railway-build.sh: Converted to LF line endings.
 
 ## Phase 7: Install & Verify (user will run manually)
-- [ ] npm install in frontend/
-- [ ] npm run build
+- [x] npm install in frontend/
+- [x] npm run build
 - [ ] python -c "from main import app"
