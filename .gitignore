@@ -15,11 +15,10 @@ build/
 # Environment variables
 .env
 
-# Photos (sensitive data)
-photos/
-
-# Database
-*.db
+# Photos + database ARE committed: they are the seeded demo data, so a fresh
+# deploy has records and images instead of being empty. (Only sample demo
+# images live here — do not commit real casework photos.)
+# The vector index is rebuilt automatically on boot, so it is not committed.
 qdrant_data/
 
 # Database backups

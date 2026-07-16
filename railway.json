@@ -1,10 +1,11 @@
 {
   "$schema": "https://railway.app/railway.schema.json",
+  "_comment": "Needs ~1.5-2.5GB RAM (InsightFace + sentence-transformers); small instances will be OOM-killed on startup. For a FREE host with enough memory, use Hugging Face Spaces - see DEPLOYMENT.md. Builds the Dockerfile, which serves the API and the web app on one port.",
   "build": {
-    "builder": "NIXPACKS"
+    "builder": "DOCKERFILE",
+    "dockerfilePath": "Dockerfile"
   },
   "deploy": {
-    "startCommand": "uvicorn main:app --host 0.0.0.0 --port $PORT --timeout-keep-alive 300",
     "healthcheckPath": "/health",
     "healthcheckTimeout": 600,
     "restartPolicyType": "ON_FAILURE",

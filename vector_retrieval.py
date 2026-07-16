@@ -36,23 +36,33 @@ class VectorRetrieval:
         age_min: Optional[int] = None,
         age_max: Optional[int] = None,
         height_min: Optional[int] = None,
-        height_max: Optional[int] = None
+        height_max: Optional[int] = None,
+        record_type: Optional[str] = None
     ) -> Filter:
         """
         Create metadata filter for search.
-        
+
         Args:
             gender: Exact gender match ("Male", "Female", "Other", "Unknown")
             age_min: Minimum age (approximate)
             age_max: Maximum age (approximate)
             height_min: Minimum height in cm (approximate)
             height_max: Maximum height in cm (approximate)
-            
+            record_type: Restrict to one population
+                ("missing_person" or "unidentified_body")
+
         Returns:
             Qdrant Filter object
         """
         must_conditions = []
-        
+
+        # Record type filter (cross-population matching: a body query should
+        # only return missing persons, and vice-versa)
+        if record_type:
+            must_conditions.append(
+                FieldCondition(key="record_type", match=MatchValue(value=record_type))
+            )
+
         # Gender filter (exact match)
         if gender:
             must_conditions.append(
@@ -186,7 +196,8 @@ class VectorRetrieval:
         age_min: Optional[int] = None,
         age_max: Optional[int] = None,
         height_min: Optional[int] = None,
-        height_max: Optional[int] = None
+        height_max: Optional[int] = None,
+        record_type: Optional[str] = None
     ) -> Tuple[List[Dict], List[Dict]]:
         """
         Search both collections in parallel.
@@ -210,9 +221,10 @@ class VectorRetrieval:
             age_min=age_min,
             age_max=age_max,
             height_min=height_min,
-            height_max=height_max
+            height_max=height_max,
+            record_type=record_type
         )
-        
+
         face_results = []
         text_results = []
         
@@ -342,7 +354,8 @@ class VectorRetrieval:
         w1: float = 0.5,
         w2: float = 0.5,
         top_n: int = 10,
-        limit_per_collection: int = 50
+        limit_per_collection: int = 50,
+        record_type: Optional[str] = None
     ) -> List[Dict]:
         """
         Complete search pipeline: parallel search + weighted combination.
@@ -376,7 +389,8 @@ class VectorRetrieval:
             age_min=age_min,
             age_max=age_max,
             height_min=height_min,
-            height_max=height_max
+            height_max=height_max,
+            record_type=record_type
         )
         
         # Combine results

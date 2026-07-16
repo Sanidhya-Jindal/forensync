@@ -1,262 +1,130 @@
-# FORENSYNC Deployment Guide
+# Deploying ForenSync
 
-## Deploy to Render.com
+## The one thing to understand first
 
-This guide will help you deploy FORENSYNC (backend + frontend) to Render.com.
+ForenSync is **not a normal web app**. It loads two AI models (face recognition +
+text embeddings) into memory and needs about **1.5–2.5 GB of RAM**.
+
+That single fact decides where you can host it:
+
+| Host | Free RAM | Works? |
+|---|---|---|
+| **Hugging Face Spaces** | **16 GB (free)** | ✅ **Recommended** |
+| Render free / starter | 512 MB | ❌ Crashes on startup (out of memory) |
+| Railway free trial | ~512 MB | ❌ Same problem |
+| Vercel / Netlify | serverless | ❌ Can't run Python AI models at all |
+| Render **standard** | 2 GB | ✅ but costs ~$25/month |
+
+**Use Hugging Face Spaces.** It's free, it's built for AI apps, and it has more
+than enough memory.
+
+The app is packaged as **one Docker image**: the API and the website run together
+on a single URL. You get one link to give people. No separate frontend to deploy,
+no CORS setup, no environment variables to configure.
 
 ---
 
-## Prerequisites
+## Deploy to Hugging Face Spaces (free)
 
-- GitHub account
-- Render.com account (free tier available)
-- Git repository with your code
+### 1. Make an account
+Go to <https://huggingface.co/join> and sign up (free).
 
----
+### 2. Create a Space
+- Click your avatar → **New Space**
+- **Space name**: `forensync`
+- **License**: pick anything (e.g. MIT)
+- **Space SDK**: choose **Docker** → **Blank**
+- **Hardware**: `CPU basic` (free, 16 GB RAM)
+- **Visibility**: **Public** (so interviewers can open it)
+- Click **Create Space**
 
-## Method 1: Using render.yaml (Recommended)
-
-### Step 1: Push Code to GitHub
+### 3. Push your code to it
+Hugging Face gives you a git URL. In a terminal, from this project folder:
 
 ```bash
-cd e:\Machine Learning\Hack4Safety\backend\backend
-git init
 git add .
-git commit -m "Initial commit - FORENSYNC"
-git branch -M main
-git remote add origin https://github.com/YOUR_USERNAME/forensync.git
-git push -u origin main
+git commit -m "Deploy ForenSync"
+
+# replace YOUR-USERNAME with your Hugging Face username
+git remote add space https://huggingface.co/spaces/YOUR-USERNAME/forensync
+git push space main
 ```
 
-### Step 2: Connect to Render
+If it asks for a password, use an **access token**, not your account password:
+create one at <https://huggingface.co/settings/tokens> (role: **write**) and paste
+that as the password.
 
-1. Go to https://render.com
-2. Sign up or log in
-3. Click "New" → "Blueprint"
-4. Connect your GitHub repository
-5. Render will automatically detect `render.yaml` and create services
+### 4. Wait for the build
+The Space page shows a **Building** log. The first build takes **10–20 minutes** —
+it installs the AI libraries and downloads the models into the image. That's
+normal and only happens once.
 
-### Step 3: Configure Environment Variables
+When it says **Running**, your app is live at:
 
-Backend service environment variables:
-- `PYTHON_VERSION`: 3.11.0
-- `DATABASE_URL`: sqlite:///./missing_persons.db
-- `QDRANT_HOST`: localhost
-- `QDRANT_PORT`: 6333
-
-Frontend service environment variables:
-- `VITE_API_URL`: https://YOUR-BACKEND-NAME.onrender.com
-
-### Step 4: Deploy
-
-- Click "Apply" to start deployment
-- Wait 5-10 minutes for build to complete
-- Your apps will be live at:
-  - Backend: https://forensync-backend.onrender.com
-  - Frontend: https://forensync-frontend.onrender.com
-
----
-
-## Method 2: Manual Deployment
-
-### Deploy Backend
-
-1. Go to Render Dashboard
-2. Click "New" → "Web Service"
-3. Connect your GitHub repository
-4. Configure:
-   - Name: `forensync-backend`
-   - Environment: `Python 3`
-   - Build Command: `pip install -r requirements_production.txt && python setup_database.py`
-   - Start Command: `uvicorn main:app --host 0.0.0.0 --port $PORT`
-   - Instance Type: `Free`
-
-5. Add Environment Variables:
-   - `PYTHON_VERSION` = `3.11.0`
-   - `DATABASE_URL` = `sqlite:///./missing_persons.db`
-
-6. Click "Create Web Service"
-
-### Deploy Frontend
-
-1. Go to Render Dashboard
-2. Click "New" → "Static Site"
-3. Connect your GitHub repository
-4. Configure:
-   - Name: `forensync-frontend`
-   - Build Command: `cd frontend && npm install && npm run build`
-   - Publish Directory: `frontend/dist`
-
-5. Add Environment Variables:
-   - `VITE_API_URL` = `https://forensync-backend.onrender.com`
-
-6. Click "Create Static Site"
-
----
-
-## Important Notes
-
-### Free Tier Limitations
-
-- Services spin down after 15 minutes of inactivity
-- First request after spin-down takes ~30 seconds
-- 750 hours/month free (enough for one service 24/7)
-
-### Database Persistence
-
-- SQLite database will reset on each deployment
-- For production, consider upgrading to:
-  - Render PostgreSQL database
-  - External database service
-
-### Face Recognition
-
-- Face recognition models (~200MB) download on first build
-- May increase build time on free tier
-- Models are cached between deployments
-
-### File Uploads
-
-- Uploaded photos stored in ephemeral filesystem
-- Files will be lost on service restart
-- For production, use cloud storage:
-  - AWS S3
-  - Cloudinary
-  - Render Disks (paid feature)
-
----
-
-## Updating Your Deployment
-
-### Auto-Deploy (Recommended)
-
-1. Enable "Auto-Deploy" in Render dashboard
-2. Every push to `main` branch triggers deployment
-3. No manual action needed
-
-### Manual Deploy
-
-1. Go to Render dashboard
-2. Select your service
-3. Click "Manual Deploy" → "Deploy latest commit"
-
----
-
-## Monitoring
-
-### Check Logs
-
-1. Go to service in Render dashboard
-2. Click "Logs" tab
-3. View real-time application logs
-
-### Health Check
-
-Your backend should respond at:
 ```
-GET https://forensync-backend.onrender.com/health
+https://YOUR-USERNAME-forensync.hf.space
 ```
 
-Expected response:
-```json
-{
-  "status": "healthy",
-  "database": "connected",
-  "qdrant": "connected"
-}
+That's the link you give interviewers.
+
+---
+
+## What happens on first startup
+
+The server does this by itself — you don't run any commands:
+
+1. Creates the vector database (it isn't stored in git).
+2. Reads the 32 seeded records from `missing_persons.db`.
+3. Generates the face + text embeddings for them (~30–60 seconds).
+4. Starts serving.
+
+So the deployed site already has **30 unidentified bodies and 2 missing persons**
+with working photo search. Nothing to set up.
+
+---
+
+## Things to know (worth saying out loud in an interview)
+
+**Uploads reset.** Free Spaces have a temporary disk. The records you seeded always
+come back (they're in git), but **new reports someone submits will disappear when
+the Space restarts or rebuilds**. That's fine for a demo. To make uploads permanent
+you'd add paid persistent storage, or move to Postgres + object storage + hosted
+Qdrant.
+
+**It sleeps.** A free Space sleeps after ~48 hours with no visitors. The next
+visitor wakes it, which takes ~30 seconds. Open your link an hour before an
+interview so it's warm.
+
+**There is no login.** Anyone with the link can search and submit reports. That's a
+deliberate demo choice — say so if asked, and mention you'd add authentication for
+real use. (An API-key gate already exists in the code: set the `API_KEY`
+environment variable to turn it on.)
+
+**One process only.** The vector database runs inside the app process, so it can't
+scale to multiple workers. Fine for a demo; for real traffic you'd run Qdrant as a
+separate service.
+
+---
+
+## Running it locally
+
+```bash
+python run_server.py
+```
+
+Then open <http://localhost:8000>. `run_server.py` restarts the API automatically
+if it crashes and appends logs to `server.log` (crash tracebacks land in
+`server_crash.log`).
+
+To rebuild the website after changing frontend code:
+
+```bash
+cd frontend && npm run build
 ```
 
 ---
 
-## Troubleshooting
+## Alternative: Render (paid)
 
-### Build Fails
-
-- Check build logs in Render dashboard
-- Verify all dependencies in requirements.txt
-- Check Python version compatibility
-
-### Service Won't Start
-
-- Check start command is correct
-- Verify PORT environment variable usage
-- Check logs for error messages
-
-### Database Errors
-
-- Ensure setup_database.py runs in build command
-- Check DATABASE_URL environment variable
-- Verify SQLite permissions
-
-### Frontend Can't Connect to Backend
-
-- Check VITE_API_URL is set correctly
-- Verify CORS settings in main.py
-- Test backend endpoint directly
-
----
-
-## Production Recommendations
-
-When ready for production:
-
-1. Use PostgreSQL instead of SQLite
-   - Add Render PostgreSQL database
-   - Update DATABASE_URL
-
-2. Enable HTTPS
-   - Render provides SSL certificates automatically
-
-3. Add Authentication
-   - Implement JWT or OAuth
-   - Protect sensitive endpoints
-
-4. Use Cloud Storage
-   - AWS S3 for photo uploads
-   - Or upgrade to Render Disks
-
-5. Monitor Performance
-   - Enable application monitoring
-   - Set up alerts for downtime
-
-6. Upgrade from Free Tier
-   - Prevent service spin-down
-   - Faster build times
-   - More resources
-
----
-
-## Cost Estimate
-
-Free Tier:
-- Backend: $0/month (with spin-down)
-- Frontend: $0/month
-- Total: $0/month
-
-Starter Plan:
-- Backend: $7/month (always-on)
-- Frontend: $0/month (static sites always free)
-- PostgreSQL: $7/month (optional)
-- Total: $7-14/month
-
----
-
-## Support
-
-- Render Documentation: https://render.com/docs
-- Render Community: https://community.render.com
-- FORENSYNC Issues: Check your repository issues
-
----
-
-## Next Steps
-
-After deployment:
-
-1. ✅ Test all endpoints
-2. ✅ Upload sample data
-3. ✅ Test face recognition
-4. ✅ Monitor performance
-5. ✅ Share your live URL!
-
-Your FORENSYNC platform is now live and accessible worldwide! 🚀
+`render.yaml` is set up for a Docker deploy on the **standard** plan (2 GB, ~$25/mo).
+Do not use the free plan — 512 MB is not enough and the service is killed on startup.

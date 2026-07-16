@@ -1,3 +1,14 @@
+---
+title: ForenSync
+emoji: 🔍
+colorFrom: red
+colorTo: gray
+sdk: docker
+app_port: 7860
+pinned: false
+short_description: AI forensic identification - match missing persons to unidentified bodies
+---
+
 # FORENSYNC
 
 <div align="center">

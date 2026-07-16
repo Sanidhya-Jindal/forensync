@@ -1,10 +1,13 @@
 import { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
+import { Fingerprint, UserSearch, ScanFace, Database, ArrowRight, ArrowUpRight, Search } from 'lucide-react';
 import { apiService } from '../api';
 
 function Home() {
+  const navigate = useNavigate();
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [q, setQ] = useState('');
 
   useEffect(() => {
     const fetchData = async () => {
@@ -22,134 +25,128 @@ function Home() {
 
   const databaseStats = stats?.data?.database || stats?.database || {};
 
+  const submitSearch = (e) => {
+    e.preventDefault();
+    navigate(q.trim() ? `/search-match?q=${encodeURIComponent(q.trim())}` : '/search-match');
+  };
+
   const features = [
     {
       label: 'REPORT',
       title: 'Unidentified Body',
-      description: 'Submit details about found unidentified bodies for identification matching',
+      description: 'Submit details about a found unidentified body for identification matching.',
       to: '/report-unidentified-body',
-      icon: '🆔',
+      Icon: Fingerprint,
     },
     {
       label: 'REPORT',
       title: 'Missing Person',
-      description: 'File a missing person report with photos and descriptions',
+      description: 'File a missing person report with photos and physical descriptions.',
       to: '/report-missing-person',
-      icon: '🔍',
+      Icon: UserSearch,
     },
     {
       label: 'SEARCH',
       title: 'Search & Match',
-      description: 'Use AI-powered facial recognition and text matching to find potential matches',
+      description: 'Cross-match with AI facial recognition and description-based similarity.',
       to: '/search-match',
-      icon: '🤖',
+      Icon: ScanFace,
     },
     {
       label: 'VIEW',
       title: 'Records',
-      description: 'Browse and manage all reported cases in the database',
+      description: 'Browse and manage every reported case in the database.',
       to: '/records',
-      icon: '📊',
+      Icon: Database,
     },
   ];
 
   return (
     <div className="py-4 relative">
-      {/* Decorative Background Elements */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute top-20 right-10 w-64 h-64 rounded-full opacity-5" 
-             style={{ background: 'radial-gradient(circle, #F87171 0%, transparent 70%)' }}></div>
-        <div className="absolute bottom-20 left-10 w-96 h-96 rounded-full opacity-5" 
-             style={{ background: 'radial-gradient(circle, #F87171 0%, transparent 70%)' }}></div>
-      </div>
+      {/* Hero */}
+      <section className="relative py-14 md:py-20 mb-14">
+        <div className="absolute inset-0 grid-bg pointer-events-none" aria-hidden="true"></div>
 
-      {/* Hero Section */}
-      <section className="mb-16 relative animate-fade-in">
-        <p className="label-warp mb-4">IDENTIFICATION SYSTEM</p>
-        <h1 className="text-5xl md:text-7xl font-medium text-white leading-tight tracking-tight mb-6 animate-slide-in">
-          Reuniting families<br />
-          through technology
-        </h1>
-        <p className="text-xl max-w-2xl mb-8 animate-fade-in" style={{ color: '#9B9B9B', animationDelay: '0.1s' }}>
-          FORENSYNC is a comprehensive platform for reporting, searching, and matching 
-          missing persons with unidentified bodies using AI-powered recognition.
-        </p>
-        <div className="flex gap-4 animate-fade-in" style={{ animationDelay: '0.2s' }}>
-          <Link to="/report-missing-person" className="btn-warp-primary">
-            Report Missing Person
-          </Link>
-          <Link to="/search-match" className="btn-warp">
-            Search Database
-          </Link>
+        <div className="relative max-w-3xl mx-auto text-center animate-fade-in">
+          <div className="inline-flex items-center gap-2 mb-6 px-3 py-1 rounded-full"
+               style={{ background: 'var(--accent-soft)', border: '1px solid var(--border)' }}>
+            <span className="w-1.5 h-1.5 rounded-full" style={{ background: 'var(--accent)' }}></span>
+            <span className="label-warp">AI Identification System</span>
+          </div>
+          <h1 className="text-4xl sm:text-5xl md:text-6xl font-medium text-white leading-[1.05] tracking-tight mb-5">
+            Reuniting families<br />through technology
+          </h1>
+          <p className="text-lg md:text-xl mb-8 text-secondary max-w-2xl mx-auto">
+            ForenSync matches missing persons with unidentified bodies using facial
+            recognition and description-based similarity — turning scattered records into answers.
+          </p>
+
+          {/* Search straight from the hero */}
+          <form onSubmit={submitSearch} className="flex flex-col sm:flex-row gap-3 max-w-2xl mx-auto mb-4">
+            <div className="relative flex-1">
+              <Search size={17} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted pointer-events-none" />
+              <input
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder="Search by name, description, or distinguishing marks…"
+                aria-label="Search records"
+                className="input-warp pl-10"
+              />
+            </div>
+            <button type="submit" className="btn-warp-primary sm:w-auto">
+              Search <ArrowRight size={16} />
+            </button>
+          </form>
+          <p className="text-sm text-muted">
+            or{' '}
+            <Link to="/report-missing-person" className="underline underline-offset-4 hover:text-white transition-colors">
+              report a missing person
+            </Link>{' '}
+            ·{' '}
+            <Link to="/report-unidentified-body" className="underline underline-offset-4 hover:text-white transition-colors">
+              report an unidentified body
+            </Link>
+          </p>
         </div>
       </section>
 
-      {/* Stats Section */}
-      <section className="mb-16 relative">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <StatCard 
-            label="UNIDENTIFIED" 
-            value={loading ? '...' : databaseStats.unidentified_bodies || 0} 
-            description="Bodies in database"
-            delay="0s"
-          />
-          <StatCard 
-            label="MISSING" 
-            value={loading ? '...' : databaseStats.missing_persons || 0} 
-            description="Persons reported"
-            delay="0.1s"
-          />
-          <StatCard 
-            label="OPEN CASES" 
-            value={loading ? '...' : (databaseStats.uidb_by_status?.Open || 0)} 
-            description="Pending identification"
-            delay="0.2s"
-          />
-          <StatCard 
-            label="IDENTIFIED" 
-            value={loading ? '...' : (databaseStats.uidb_by_status?.Identified || 0)} 
-            description="Successful matches"
-            delay="0.3s"
-          />
+      {/* Stats */}
+      <section className="mb-16">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
+          <StatCard label="UNIDENTIFIED" value={loading ? '—' : databaseStats.unidentified_bodies ?? 0} description="Bodies in database" />
+          <StatCard label="MISSING" value={loading ? '—' : databaseStats.missing_persons ?? 0} description="Persons reported" />
+          <StatCard label="OPEN CASES" value={loading ? '—' : (databaseStats.uidb_by_status?.Open ?? 0)} description="Pending identification" />
+          <StatCard label="IDENTIFIED" value={loading ? '—' : (databaseStats.uidb_by_status?.Identified ?? 0)} description="Successful matches" accent />
         </div>
       </section>
 
-      {/* Features Grid */}
-      <section className="relative">
-        <p className="label-warp mb-4">FEATURES</p>
-        <h2 className="text-3xl font-medium text-white mb-8">What you can do</h2>
-        <div className="grid md:grid-cols-2 gap-4">
-          {features.map((feature, index) => (
+      {/* Features */}
+      <section>
+        <p className="label-warp mb-3">WHAT YOU CAN DO</p>
+        <h2 className="text-2xl md:text-3xl font-medium text-white mb-8">Four ways to work a case</h2>
+        <div className="grid md:grid-cols-2 gap-3 md:gap-4">
+          {features.map((feature) => (
             <Link
-              key={index}
+              key={feature.title}
               to={feature.to}
-              className="card-warp p-6 group transition-all duration-200 relative overflow-hidden"
-              style={{ animationDelay: `${index * 0.1}s` }}
+              className="card-warp p-6 group relative overflow-hidden focus:outline-none focus-visible:ring-2"
+              style={{ outlineColor: 'var(--accent)' }}
             >
-              {/* Hover gradient effect */}
-              <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300"
-                   style={{ background: 'radial-gradient(circle at top right, rgba(248,113,113,0.1) 0%, transparent 60%)' }}></div>
-              
-              <div className="relative">
-                <div className="flex items-center gap-3 mb-3">
-                  <span className="text-3xl">{feature.icon}</span>
-                  <p className="label-warp">{feature.label}</p>
-                </div>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h3 className="text-xl font-medium text-white mb-1">{feature.title}</h3>
-                    <p style={{ color: '#717171' }}>{feature.description}</p>
+              <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none"
+                   style={{ background: 'radial-gradient(circle at top right, var(--accent-soft) 0%, transparent 60%)' }}></div>
+              <div className="relative flex items-start justify-between gap-4">
+                <div className="flex items-start gap-4">
+                  <div className="shrink-0 w-11 h-11 rounded-xl flex items-center justify-center"
+                       style={{ background: 'var(--accent-soft)', color: 'var(--accent)' }}>
+                    <feature.Icon size={20} strokeWidth={1.75} />
                   </div>
-                  <svg 
-                    className="w-6 h-6 group-hover:text-white group-hover:translate-x-1 transition-all" 
-                    style={{ color: '#717171' }}
-                    fill="none" 
-                    stroke="currentColor" 
-                    viewBox="0 0 24 24"
-                  >
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                  </svg>
+                  <div>
+                    <p className="label-warp mb-1">{feature.label}</p>
+                    <h3 className="text-lg font-medium text-white mb-1">{feature.title}</h3>
+                    <p className="text-muted text-sm leading-relaxed">{feature.description}</p>
+                  </div>
                 </div>
+                <ArrowUpRight size={20} className="shrink-0 text-muted group-hover:text-white group-hover:-translate-y-0.5 group-hover:translate-x-0.5 transition-all" />
               </div>
             </Link>
           ))}
@@ -159,12 +156,13 @@ function Home() {
   );
 }
 
-function StatCard({ label, value, description, delay }) {
+function StatCard({ label, value, description, accent }) {
   return (
-    <div className="card-warp p-6 group" style={{ animationDelay: delay }}>
+    <div className="card-warp p-5 md:p-6 group">
       <p className="label-warp mb-2">{label}</p>
-      <p className="text-4xl font-medium text-white mb-1 transition-all group-hover:scale-110 inline-block">{value}</p>
-      <p className="text-sm" style={{ color: '#717171' }}>{description}</p>
+      <p className="text-3xl md:text-4xl font-medium mb-1 transition-all group-hover:scale-105 inline-block"
+         style={{ color: accent ? 'var(--accent)' : '#fff' }}>{value}</p>
+      <p className="text-muted text-sm">{description}</p>
     </div>
   );
 }

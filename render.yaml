@@ -1,24 +1,25 @@
+# ---------------------------------------------------------------------------
+# Render deployment (PAID — see note).
+#
+# MEMORY: this app loads InsightFace + sentence-transformers and needs roughly
+# 1.5-2.5 GB of RAM. Render's `free` and `starter` plans give 512 MB, so the
+# service is OOM-killed on startup. The previous config here used `plan: free`
+# AND requirements_minimal.txt (which has no face recognition), so it could
+# never have worked. `standard` (2 GB) is the smallest plan that runs this.
+#
+# The Docker image serves the API *and* the React app on one port, so the
+# separate static frontend service is no longer needed.
+#
+# WANT IT FREE? Use Hugging Face Spaces (Docker, 16 GB RAM, free) instead —
+# see DEPLOYMENT.md. This file is only for a paid Render deploy.
+# ---------------------------------------------------------------------------
 services:
-  # Backend API (Minimal - without face recognition)
   - type: web
-    name: forensync-backend
-    runtime: python
-    plan: free
-    buildCommand: "pip install -r requirements_minimal.txt"
-    startCommand: "uvicorn main:app --host 0.0.0.0 --port $PORT"
+    name: forensync
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: standard          # 2 GB RAM. free/starter (512 MB) WILL crash.
     healthCheckPath: /health
     envVars:
-      - key: PYTHON_VERSION
-        value: 3.11.0
-    
-  # Frontend Static Site  
-  - type: web
-    name: forensync-frontend
-    runtime: static
-    buildCommand: "cd frontend && npm ci && npm run build"
-    staticPublishPath: ./frontend/dist
-    envVars:
-      - key: NODE_VERSION
-        value: 20.11.0
-      - key: VITE_API_URL
-        value: https://forensync-backend.onrender.com
+      - key: PORT
+        value: 10000

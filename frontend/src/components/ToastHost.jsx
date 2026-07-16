@@ -5,7 +5,7 @@ const toneClasses = {
   success: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-100',
   error: 'border-red-500/30 bg-red-500/10 text-red-100',
   warning: 'border-amber-500/30 bg-amber-500/10 text-amber-50',
-  info: 'border-slate-600 bg-slate-800 text-slate-100',
+  info: 'border-white/15 bg-[var(--surface)] text-white',
 };
 
 const toneIcons = {
@@ -28,7 +28,7 @@ export default function ToastHost() {
               <Icon className="mt-0.5 h-5 w-5 shrink-0" />
               <div className="min-w-0 flex-1">
                 <div className="font-medium text-white">{toast.title}</div>
-                {toast.message ? <div className="mt-1 text-sm text-slate-200">{toast.message}</div> : null}
+                {toast.message ? <div className="mt-1 text-sm text-secondary">{toast.message}</div> : null}
               </div>
               <button type="button" onClick={() => removeToast(toast.id)} className="rounded p-1 text-current/80 transition hover:bg-white/10 hover:text-white">
                 <X className="h-4 w-4" />

@@ -3,18 +3,59 @@ FastAPI Application for Missing Persons and Unidentified Bodies System
 Provides REST API endpoints for reporting and searching
 """
 
-from fastapi import FastAPI, File, UploadFile, Form, HTTPException, status
+from fastapi import FastAPI, File, UploadFile, Form, HTTPException, status, Header, Depends
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import Optional, List
+import sys
 import sqlite3
 import json
 import os
 import shutil
+import faulthandler
+import logging
 from datetime import datetime
 import uuid
 from pathlib import Path
+
+# Ensure Unicode banner output (✓, ⚠) never crashes on a non-UTF-8 console
+# (e.g. Windows cp1252 when stdout is piped/redirected).
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
+# ---------------------------------------------------------------------------
+# Crash diagnostics.
+# The heavy native deps here (onnxruntime / insightface / torch) can abort the
+# process without any Python traceback, which previously left an empty log and
+# a dead server. faulthandler dumps a real traceback on segfault/abort, and we
+# append it (never truncate) so the evidence survives a restart.
+# ---------------------------------------------------------------------------
+_CRASH_LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "server_crash.log")
+try:
+    _crash_fp = open(_CRASH_LOG, "a", buffering=1, encoding="utf-8")
+    _crash_fp.write(f"\n=== process start {datetime.now().isoformat()} pid={os.getpid()} ===\n")
+    faulthandler.enable(file=_crash_fp, all_threads=True)
+except Exception as _e:  # never let logging setup kill startup
+    print(f"⚠ Could not enable crash log: {_e}")
+
+
+def _log_unhandled(exc_type, exc_value, exc_tb):
+    """Record any unhandled exception before the interpreter exits."""
+    import traceback
+    try:
+        with open(_CRASH_LOG, "a", encoding="utf-8") as fh:
+            fh.write(f"\n=== unhandled exception {datetime.now().isoformat()} ===\n")
+            traceback.print_exception(exc_type, exc_value, exc_tb, file=fh)
+    except Exception:
+        pass
+    sys.__excepthook__(exc_type, exc_value, exc_tb)
+
+
+sys.excepthook = _log_unhandled
 
 # Import our modules
 from db_helper import DatabaseHelper
@@ -59,6 +100,18 @@ QDRANT_DATA_PATH = "./qdrant_data"
 PHOTO_BASE_DIR = "photos"
 UIDB_PHOTO_DIR = os.path.join(PHOTO_BASE_DIR, "unidentified_bodies")
 MISSING_PHOTO_DIR = os.path.join(PHOTO_BASE_DIR, "missing_persons")
+
+# Optional API-key auth. Disabled by default (no key => open, for local dev).
+# Set the API_KEY env var to require an "X-API-Key" header on data endpoints.
+API_KEY = os.environ.get("API_KEY", "").strip()
+
+
+async def require_api_key(x_api_key: Optional[str] = Header(None)):
+    """Dependency enforcing the API key, but only when one is configured."""
+    if not API_KEY:
+        return  # auth disabled in dev
+    if not x_api_key or x_api_key != API_KEY:
+        raise HTTPException(status_code=401, detail="Invalid or missing API key")
 
 
 # ============================================================================
@@ -175,6 +228,26 @@ if FACE_RECOGNITION_AVAILABLE:
 # Ensure photo directories exist
 os.makedirs(UIDB_PHOTO_DIR, exist_ok=True)
 os.makedirs(MISSING_PHOTO_DIR, exist_ok=True)
+
+
+def _sweep_stale_temp_files():
+    """Delete temp_*.jpg left behind by requests that died mid-flight.
+
+    Uploads are staged as temp_<uuid>.jpg in the project root; if the process
+    is killed between saving and cleanup, the file is orphaned forever.
+    """
+    removed = 0
+    for stale in Path(".").glob("temp_*.jpg"):
+        try:
+            stale.unlink()
+            removed += 1
+        except OSError:
+            pass
+    if removed:
+        print(f"✓ Cleaned up {removed} stale temp upload(s)")
+
+
+_sweep_stale_temp_files()
 
 
 # ============================================================================
@@ -357,6 +430,31 @@ def get_record_details(pid: str) -> dict:
     return record
 
 
+# Fixed namespace so Qdrant point IDs are deterministic and globally unique.
+# PIDs are globally unique across tables (e.g. "MP-2026-00002", "UIDB-2025-00101"),
+# so deriving the point ID from the PID prevents collisions between missing_persons
+# and unidentified_bodies that share the same integer table id.
+_POINT_ID_NAMESPACE = uuid.UUID("6f0d8a1e-7c2b-4b6a-9e3d-1a2b3c4d5e6f")
+
+
+def point_id_for(pid: str) -> str:
+    """Deterministic, collision-free Qdrant point ID for a given record PID."""
+    return str(uuid.uuid5(_POINT_ID_NAMESPACE, str(pid)))
+
+
+def _match_band(score: float) -> str:
+    """Label a combined similarity score so weak matches aren't shown as real.
+
+    Thresholds are tuned for InsightFace (w600k) cosine similarity, where the
+    same person typically scores >0.5 and different people <0.3.
+    """
+    if score >= 0.55:
+        return "strong"
+    if score >= 0.35:
+        return "possible"
+    return "weak"
+
+
 def _cleanup_temp_file(path):
     """Safely remove a temp file"""
     if path and os.path.exists(path):
@@ -370,9 +468,9 @@ def _cleanup_temp_file(path):
 # API ENDPOINTS
 # ============================================================================
 
-@app.get("/")
-async def root():
-    """Root endpoint - API information"""
+@app.get("/api")
+async def api_root():
+    """API information (the web app itself is served at /)."""
     return {
         "message": "Missing Persons & Unidentified Bodies API",
         "version": "1.0.0",
@@ -425,7 +523,7 @@ async def health_check():
     return result
 
 
-@app.post("/api/report-unidentified-body")
+@app.post("/api/report-unidentified-body", dependencies=[Depends(require_api_key)])
 async def report_unidentified_body(
     police_station: str = Form(...),
     found_date: str = Form(...),
@@ -576,7 +674,7 @@ async def report_unidentified_body(
                 metadata["description"] = text_description
                 
                 point = PointStruct(
-                    id=db_id,
+                    id=point_id_for(pid),
                     vector=text_embedding.tolist(),
                     payload=metadata
                 )
@@ -598,7 +696,7 @@ async def report_unidentified_body(
                     face_embedding = face_extractor.extract_embedding(full_photo_path, return_normalized=True)
                     
                     point = PointStruct(
-                        id=db_id,
+                        id=point_id_for(pid),
                         vector=face_embedding.tolist(),
                         payload=metadata
                     )
@@ -631,7 +729,7 @@ async def report_unidentified_body(
         raise HTTPException(status_code=500, detail="Failed to create report")
 
 
-@app.post("/api/report-missing-person")
+@app.post("/api/report-missing-person", dependencies=[Depends(require_api_key)])
 async def report_missing_person(
     fir_number: str = Form(...),
     police_station: str = Form(...),
@@ -754,7 +852,7 @@ async def report_missing_person(
                     metadata = {k: v for k, v in metadata.items() if v is not None}
                     
                     point = PointStruct(
-                        id=db_id,
+                        id=point_id_for(pid),
                         vector=text_embedding.tolist(),
                         payload=metadata
                     )
@@ -773,7 +871,7 @@ async def report_missing_person(
                             if os.path.exists(full_photo_path):
                                 face_embedding = face_extractor.extract_embedding(full_photo_path, return_normalized=True)
                                 point = PointStruct(
-                                    id=db_id,
+                                    id=point_id_for(pid),
                                     vector=face_embedding.tolist(),
                                     payload=metadata
                                 )
@@ -803,7 +901,7 @@ async def report_missing_person(
         raise HTTPException(status_code=500, detail="Failed to create report")
 
 
-@app.post("/api/search-missing-person")
+@app.post("/api/search-missing-person", dependencies=[Depends(require_api_key)])
 async def search_missing_person(
     full_name: Optional[str] = Form(None),
     age: Optional[int] = Form(None),
@@ -816,30 +914,42 @@ async def search_missing_person(
     last_seen_clothing: Optional[str] = Form(None),
     person_description: Optional[str] = Form(None),
     search_text: Optional[str] = Form(None),
+    target_type: str = Form("missing_person"),
     top_n: int = Form(10),
     face_weight: float = Form(0.6),
     text_weight: float = Form(0.4),
+    min_confidence: float = Form(0.1),
     photo: Optional[UploadFile] = File(None)
 ):
     """
-    Search for missing person matches
-    Returns top N matches from vector database with full details
+    Search for matches in the opposite population.
+
+    By default (target_type="missing_person") this identifies an unidentified
+    body against the missing-persons register; pass "unidentified_body" for the
+    reverse, or "any" to search both. Returns matches ranked by a modality-aware
+    weighted similarity, filtered by min_confidence.
     """
     try:
         face_embedding = None
         text_embedding = None
-        
+        face_available_but_no_face = False
+
         if photo and FACE_RECOGNITION_AVAILABLE:
+            temp_photo_path = f"temp_{uuid.uuid4()}.jpg"
             try:
-                temp_photo_path = f"temp_{uuid.uuid4()}.jpg"
                 save_upload_file(photo, temp_photo_path)
                 face_embedding = face_extractor.extract_embedding(temp_photo_path, return_normalized=True)
-                _cleanup_temp_file(temp_photo_path)
             except Exception as e:
+                face_available_but_no_face = True
                 print(f"Warning: Failed to extract face embedding: {e}")
-        
-        if search_text:
-            description = search_text
+            finally:
+                _cleanup_temp_file(temp_photo_path)
+
+        # Only build a text query when meaningful text was actually provided.
+        # A photo-only search must NOT be diluted by an empty "." description.
+        description = None
+        if search_text and search_text.strip():
+            description = search_text.strip()
         else:
             data_dict = {
                 'full_name': full_name,
@@ -853,69 +963,84 @@ async def search_missing_person(
                 'last_seen_clothing': last_seen_clothing,
                 'person_description': person_description
             }
-            description = generate_text_description(data_dict)
-        
-        if TEXT_EMBEDDER_AVAILABLE and text_embedder:
+            generated = generate_text_description(data_dict)
+            # generate_text_description returns "." when nothing was supplied
+            if generated and generated.strip(". ").strip():
+                description = generated
+
+        if description and TEXT_EMBEDDER_AVAILABLE and text_embedder:
             try:
                 text_embedding = text_embedder.get_embedding(description)
             except Exception as e:
                 print(f"Warning: Failed to generate text embedding: {e}")
-        
+
         if face_embedding is None and text_embedding is None:
-            raise HTTPException(
-                status_code=400,
-                detail="No valid embeddings generated. Provide either a photo or text description."
-            )
-        
+            detail = "No valid embeddings generated. Provide either a photo or text description."
+            if face_available_but_no_face:
+                detail = "No face could be detected in the uploaded photo. Try a clearer, front-facing image or add a text description."
+            raise HTTPException(status_code=400, detail=detail)
+
         if not QDRANT_AVAILABLE or not vector_retrieval:
             raise HTTPException(
                 status_code=503,
                 detail="Vector search service is not available."
             )
-        
+
+        # Modality-aware weighting: only weight the modalities we actually have,
+        # so a photo-only or text-only search is ranked on real signal alone.
+        fw = max(0.0, face_weight) if face_embedding is not None else 0.0
+        tw = max(0.0, text_weight) if text_embedding is not None else 0.0
+        if fw == 0.0 and tw == 0.0:
+            fw, tw = (1.0, 0.0) if face_embedding is not None else (0.0, 1.0)
+
+        record_type = None if target_type in (None, "", "any") else target_type
+
         search_results = vector_retrieval.search_and_combine(
             face_embedding=face_embedding,
             text_embedding=text_embedding,
-            gender=None,
-            age_min=None,
-            age_max=None,
-            height_min=None,
-            height_max=None,
-            w1=face_weight,
-            w2=text_weight,
+            w1=fw,
+            w2=tw,
             top_n=top_n,
-            limit_per_collection=50
+            limit_per_collection=50,
+            record_type=record_type
         )
-        
+
         enriched_results = []
         for result in search_results:
+            score = result['combined_score']
+            if score < min_confidence:
+                continue
             pid = result['pid']
             record_details = get_record_details(pid)
-            
+
             if record_details:
                 if record_details.get('extra_photos'):
                     try:
                         record_details['extra_photos'] = json.loads(record_details['extra_photos'])
                     except Exception:
                         pass
-                
+
                 enriched_results.append({
                     "pid": pid,
-                    "combined_score": result['combined_score'],
+                    "combined_score": score,
                     "face_score": result['face_score'],
                     "text_score": result['text_score'],
-                    "confidence_percentage": round(result['combined_score'] * 100, 2),
+                    "confidence_percentage": round(score * 100, 2),
+                    "match_band": _match_band(score),
                     "details": record_details
                 })
-        
+
         return {
             "status": "success",
             "message": f"Found {len(enriched_results)} potential matches",
             "search_params": {
-                "description": description,
+                "query_text": description,
                 "has_photo": photo is not None,
-                "face_weight": face_weight,
-                "text_weight": text_weight
+                "face_detected": face_embedding is not None,
+                "target_type": record_type or "any",
+                "effective_face_weight": round(fw, 3),
+                "effective_text_weight": round(tw, 3),
+                "min_confidence": min_confidence
             },
             "results": enriched_results
         }
@@ -927,7 +1052,7 @@ async def search_missing_person(
         raise HTTPException(status_code=500, detail="Search failed")
 
 
-@app.get("/api/record/{pid}")
+@app.get("/api/record/{pid}", dependencies=[Depends(require_api_key)])
 async def get_record(pid: str):
     """Get full record details by PID"""
     try:
@@ -1011,7 +1136,7 @@ async def get_statistics():
         raise HTTPException(status_code=500, detail="Failed to fetch statistics")
 
 
-@app.get("/api/unidentified-bodies")
+@app.get("/api/unidentified-bodies", dependencies=[Depends(require_api_key)])
 async def get_all_unidentified_bodies():
     """Get all unidentified body records"""
     try:
@@ -1041,7 +1166,7 @@ async def get_all_unidentified_bodies():
         raise HTTPException(status_code=500, detail="Failed to fetch records")
 
 
-@app.get("/api/missing-persons")
+@app.get("/api/missing-persons", dependencies=[Depends(require_api_key)])
 async def get_all_missing_persons():
     """Get all missing person records"""
     try:
@@ -1071,13 +1196,159 @@ async def get_all_missing_persons():
         raise HTTPException(status_code=500, detail="Failed to fetch records")
 
 
+SERVEABLE_PHOTO_SUFFIXES = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
+
+
 @app.get("/photos/{file_path:path}")
 async def serve_photo(file_path: str):
-    """Serve uploaded photos"""
-    full_path = os.path.join(PHOTO_BASE_DIR, file_path)
-    if not os.path.exists(full_path):
+    """Serve uploaded photos.
+
+    Strictly confined to PHOTO_BASE_DIR: the resolved target must stay inside
+    the photos directory and must be an image. Without this, a path like
+    "/photos/../missing_persons.db" escaped the directory and served the whole
+    database (and any source file) to unauthenticated callers.
+    """
+    base = Path(PHOTO_BASE_DIR).resolve()
+    try:
+        target = (base / file_path).resolve()
+    except (OSError, ValueError):
         raise HTTPException(status_code=404, detail="Photo not found")
-    return FileResponse(full_path)
+
+    if not target.is_relative_to(base):
+        raise HTTPException(status_code=404, detail="Photo not found")
+    if target.suffix.lower() not in SERVEABLE_PHOTO_SUFFIXES:
+        raise HTTPException(status_code=404, detail="Photo not found")
+    if not target.is_file():
+        raise HTTPException(status_code=404, detail="Photo not found")
+
+    return FileResponse(target)
+
+
+# ============================================================================
+# VECTOR DB BOOTSTRAP (makes a fresh deploy work with zero manual steps)
+# ============================================================================
+
+def _bootstrap_vector_db():
+    """Create the Qdrant collections and index existing records if empty.
+
+    qdrant_data/ is not committed, so a fresh deploy starts with no vector
+    index at all and search would silently return nothing. This seeds it from
+    whatever is already in SQLite. It only runs when the index is empty, so
+    it's safe on every boot.
+    """
+    if not (QDRANT_AVAILABLE and qdrant_client and TEXT_EMBEDDER_AVAILABLE and text_embedder):
+        print("⚠ Skipping vector bootstrap (qdrant or text embedder unavailable)")
+        return
+    try:
+        from qdrant_client.models import Distance, VectorParams
+
+        existing = {c.name for c in qdrant_client.get_collections().collections}
+        for name, size in (("face_embeddings", 512), ("text_embeddings", 768)):
+            if name not in existing:
+                qdrant_client.create_collection(
+                    collection_name=name,
+                    vectors_config=VectorParams(size=size, distance=Distance.COSINE),
+                )
+                print(f"✓ Created Qdrant collection: {name}")
+
+        if qdrant_client.count("text_embeddings").count > 0:
+            return  # already indexed
+
+        conn = sqlite3.connect(DB_FILE)
+        conn.row_factory = sqlite3.Row
+        rows = []
+        for table, rtype in (("unidentified_bodies", "unidentified_body"),
+                             ("missing_persons", "missing_person")):
+            try:
+                for r in conn.execute(f"SELECT * FROM {table}").fetchall():
+                    rows.append((dict(r), rtype))
+            except sqlite3.Error:
+                pass
+        conn.close()
+
+        if not rows:
+            print("✓ Vector DB empty and no records to index yet")
+            return
+
+        print(f"⏳ Vector DB empty — indexing {len(rows)} record(s), this can take a minute…")
+        text_n = face_n = 0
+        for r, rtype in rows:
+            pid = r.get("pid")
+            if not pid:
+                continue
+            description = generate_text_description(r)
+            metadata = {
+                "pid": pid,
+                "record_type": rtype,
+                "gender": r.get("gender"),
+                "estimated_age": r.get("estimated_age") or r.get("age"),
+                "height_cm": r.get("height_cm"),
+                "police_station": r.get("police_station"),
+                "status": r.get("status", "Open"),
+                "description": description,
+                "name": r.get("name"),
+            }
+            metadata = {k: v for k, v in metadata.items() if v is not None}
+            pt_id = point_id_for(pid)
+
+            try:
+                emb = text_embedder.get_embedding(description)
+                qdrant_client.upsert("text_embeddings",
+                                     [PointStruct(id=pt_id, vector=emb.tolist(), payload=metadata)])
+                text_n += 1
+            except Exception as e:
+                print(f"  ! {pid} text embedding failed: {e}")
+
+            photo = r.get("profile_photo")
+            if FACE_RECOGNITION_AVAILABLE and photo:
+                full = photo if os.path.isabs(photo) else os.path.join(os.getcwd(), photo)
+                if os.path.exists(full):
+                    try:
+                        femb = face_extractor.extract_embedding(full, return_normalized=True)
+                        qdrant_client.upsert("face_embeddings",
+                                             [PointStruct(id=pt_id, vector=femb.tolist(), payload=metadata)])
+                        face_n += 1
+                    except Exception:
+                        pass  # no detectable face — expected for some body photos
+
+        print(f"✓ Bootstrap indexed {text_n} text / {face_n} face embeddings")
+    except Exception as e:
+        print(f"⚠ Vector bootstrap failed (search may be empty): {e}")
+
+
+_bootstrap_vector_db()
+
+
+# ============================================================================
+# SERVE THE FRONTEND (single-service deployment)
+# ============================================================================
+# In production the built React app is served by this same process, so the
+# whole product lives on ONE url with no CORS and no separate frontend host.
+# This block must stay LAST: its catch-all route would otherwise swallow the
+# /api and /photos routes defined above (FastAPI matches in declaration order).
+
+FRONTEND_DIST = Path(__file__).parent / "frontend" / "dist"
+
+if FRONTEND_DIST.is_dir():
+    from fastapi.staticfiles import StaticFiles
+
+    _assets = FRONTEND_DIST / "assets"
+    if _assets.is_dir():
+        app.mount("/assets", StaticFiles(directory=_assets), name="assets")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def serve_frontend(full_path: str):
+        """Serve the built SPA, falling back to index.html for client routes."""
+        dist = FRONTEND_DIST.resolve()
+        if full_path:
+            candidate = (dist / full_path).resolve()
+            if candidate.is_relative_to(dist) and candidate.is_file():
+                return FileResponse(candidate)
+        return FileResponse(dist / "index.html")
+
+    print(f"✓ Serving frontend from {FRONTEND_DIST}")
+else:
+    print("⚠ No frontend build found (frontend/dist) — API only")
 
 
 # ============================================================================
@@ -1086,9 +1357,10 @@ async def serve_photo(file_path: str):
 
 if __name__ == "__main__":
     import uvicorn
-    
+
     host = os.environ.get("API_HOST", "0.0.0.0")
-    port = int(os.environ.get("API_PORT", "8000"))
+    # PORT is the standard on every host (Hugging Face, Render, Railway…)
+    port = int(os.environ.get("PORT") or os.environ.get("API_PORT") or "8000")
     
     print("\n" + "="*70)
     print("Starting Missing Persons & Unidentified Bodies API")

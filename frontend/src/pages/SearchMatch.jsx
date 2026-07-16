@@ -1,12 +1,15 @@
-import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useEffect, useRef } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { ChevronLeft } from 'lucide-react';
 import { apiService } from '../api';
 import { assetUrl } from '../utils';
 
 function SearchMatch() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [searchType, setSearchType] = useState('text');
-  const [query, setQuery] = useState('');
+  const [targetType, setTargetType] = useState('missing_person');
+  const [query, setQuery] = useState(searchParams.get('q') || '');
   const [photo, setPhoto] = useState(null);
   const [photoPreview, setPhotoPreview] = useState('');
   const [results, setResults] = useState([]);
@@ -21,6 +24,16 @@ function SearchMatch() {
     return () => URL.revokeObjectURL(objectUrl);
   }, [photo]);
 
+  // If we arrived from the home hero with ?q=…, run that search immediately.
+  const ranInitial = useRef(false);
+  useEffect(() => {
+    if (searchParams.get('q') && !ranInitial.current) {
+      ranInitial.current = true;
+      handleSearch();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const handlePhotoChange = (e) => {
     const file = e.target.files[0];
     if (file) {
@@ -30,21 +43,21 @@ function SearchMatch() {
   };
 
   const handleSearch = async (e) => {
-    e.preventDefault();
+    e?.preventDefault();
     setError('');
     setSearching(true);
     setResults([]);
 
     try {
+      const formData = new FormData();
       if (searchType === 'photo' && photo) {
-        const formData = new FormData();
         formData.append('photo', photo);
-        const response = await apiService.searchByImage(formData);
-        setResults(response.data.matches || []);
       } else {
-        const response = await apiService.searchMatch({ search_text: query });
-        setResults(response.data.matches || []);
+        formData.append('search_text', query);
       }
+      formData.append('target_type', targetType);
+      const response = await apiService.searchMatch(formData);
+      setResults(response.data.results || []);
     } catch (err) {
       setError(err.response?.data?.detail || 'Search failed');
     } finally {
@@ -55,20 +68,17 @@ function SearchMatch() {
   return (
     <div className="py-4">
       {/* Back Button */}
-      <button 
-        onClick={() => navigate(-1)} 
-        className="flex items-center gap-2 text-sm mb-6 transition-colors hover:text-white"
-        style={{ color: '#9B9B9B' }}
+      <button
+        onClick={() => navigate(-1)}
+        className="flex items-center gap-1.5 text-sm mb-6 text-secondary transition-colors hover:text-white"
       >
-        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-        </svg>
+        <ChevronLeft size={16} />
         Back
       </button>
 
-      <p className="label-warp mb-4">SEARCH</p>
-      <h1 className="text-4xl font-medium text-white mb-2">Search & Match</h1>
-      <p className="mb-8" style={{ color: '#9B9B9B' }}>
+      <p className="label-warp mb-3">SEARCH</p>
+      <h1 className="text-3xl md:text-4xl font-medium text-white mb-2">Search &amp; Match</h1>
+      <p className="mb-8 text-secondary">
         Find potential matches between missing persons and unidentified bodies.
       </p>
 
@@ -94,6 +104,25 @@ function SearchMatch() {
         </button>
       </div>
 
+      {/* Which population to match against (cross-population search) */}
+      <div className="mb-6">
+        <p className="text-sm mb-2 text-secondary">Search against</p>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setTargetType('missing_person')}
+            className={targetType === 'missing_person' ? 'btn-warp-primary' : 'btn-warp'}
+          >
+            Missing Persons
+          </button>
+          <button
+            onClick={() => setTargetType('unidentified_body')}
+            className={targetType === 'unidentified_body' ? 'btn-warp-primary' : 'btn-warp'}
+          >
+            Unidentified Bodies
+          </button>
+        </div>
+      </div>
+
       {/* Search Form */}
       <form onSubmit={handleSearch} className="mb-8">
         {searchType === 'text' ? (
@@ -115,9 +144,9 @@ function SearchMatch() {
           </div>
         ) : (
           <div className="card-warp p-6">
-            <div className="flex items-center gap-6">
-              <div className="flex-1">
-                <label className="block text-sm mb-2" style={{ color: '#9B9B9B' }}>
+            <div className="flex flex-col sm:flex-row items-start gap-6">
+              <div className="flex-1 w-full">
+                <label className="block text-sm mb-2 text-secondary">
                   Upload a photo for facial recognition matching
                 </label>
                 <input
@@ -126,20 +155,18 @@ function SearchMatch() {
                   onChange={handlePhotoChange}
                   className="input-warp"
                 />
+                <button
+                  type="submit"
+                  disabled={searching || !photo}
+                  className="btn-warp-primary mt-4 disabled:opacity-50"
+                >
+                  {searching ? 'Scanning…' : 'Search by Photo'}
+                </button>
               </div>
               {photoPreview && (
-                <div className="w-24 h-24 rounded-lg overflow-hidden" style={{ border: '1px solid #333333' }}>
-                  <img src={photoPreview} alt="Preview" className="w-full h-full object-cover" />
-                </div>
+                <ScanPreview src={photoPreview} scanning={searching} />
               )}
             </div>
-            <button
-              type="submit"
-              disabled={searching || !photo}
-              className="btn-warp-primary mt-4 disabled:opacity-50"
-            >
-              {searching ? 'Analyzing...' : 'Search by Photo'}
-            </button>
           </div>
         )}
       </form>
@@ -153,7 +180,7 @@ function SearchMatch() {
           </div>
         ) : results.length === 0 ? (
           <div className="card-warp p-12 text-center">
-            <p style={{ color: '#717171' }}>No results yet. Enter a search query above.</p>
+            <p className="text-muted">No results yet. Enter a search query above.</p>
           </div>
         ) : (
           <div className="space-y-3">
@@ -167,17 +194,54 @@ function SearchMatch() {
   );
 }
 
+function ScanPreview({ src, scanning }) {
+  const corner = (pos) => {
+    const s = { position: 'absolute', width: 16, height: 16 };
+    if (pos.includes('t')) { s.top = 6; s.borderTop = '2px solid'; }
+    if (pos.includes('b')) { s.bottom = 6; s.borderBottom = '2px solid'; }
+    if (pos.includes('l')) { s.left = 6; s.borderLeft = '2px solid'; }
+    if (pos.includes('r')) { s.right = 6; s.borderRight = '2px solid'; }
+    return s;
+  };
+  return (
+    <div className={`scan-frame rounded-xl shrink-0 ${scanning ? 'scanning' : ''}`}
+         style={{ width: 200, height: 200, border: '1px solid var(--border-strong)', background: '#000' }}>
+      <img src={src} alt="Uploaded face being scanned" className="w-full h-full object-cover" style={{ opacity: 0.92 }} />
+      <div className="scan-grid" />
+      <div className="scan-band" />
+      <div className="scan-line" style={{ top: 0 }} />
+      <span className="scan-corner" style={corner('tl')} />
+      <span className="scan-corner" style={corner('tr')} />
+      <span className="scan-corner" style={corner('bl')} />
+      <span className="scan-corner" style={corner('br')} />
+      <div className="absolute left-0 right-0 bottom-0 flex items-center gap-2 px-2 py-1.5"
+           style={{ background: 'linear-gradient(180deg, transparent, rgba(0,0,0,0.75))' }}>
+        <span className="w-1.5 h-1.5 rounded-full" style={{ background: 'var(--accent)' }} />
+        <span className="text-[11px] font-medium tracking-wide" style={{ color: 'var(--text-secondary)' }}>
+          {scanning ? 'SCANNING FACE…' : 'READY TO SCAN'}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 function ResultCard({ result }) {
-  const confidence = Math.round((result.similarity || result.confidence_score || 0) * 100);
-  
+  const details = result.details || {};
+  const confidence = Math.round(
+    result.confidence_percentage != null
+      ? result.confidence_percentage
+      : (result.combined_score || 0) * 100
+  );
+  const photoPath = details.profile_photo;
+
   return (
     <div className="card-warp p-4 transition-all duration-300 cursor-pointer group animate-fade-in hover:scale-[1.01]">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
-          {result.photo_path && (
-            <div className="w-16 h-16 rounded-lg overflow-hidden relative group-hover:scale-110 transition-transform duration-300" style={{ backgroundColor: '#1A1A1A' }}>
-              <img 
-                src={assetUrl(result.photo_path)}
+          {photoPath && (
+            <div className="w-16 h-16 rounded-lg overflow-hidden relative group-hover:scale-110 transition-transform duration-300" style={{ background: 'var(--surface-2)' }}>
+              <img
+                src={assetUrl(photoPath)}
                 alt="Match"
                 className="w-full h-full object-cover"
                 onError={(e) => e.target.style.display = 'none'}
@@ -187,22 +251,24 @@ function ResultCard({ result }) {
           )}
           <div>
             <p className="text-white font-medium font-mono">{result.pid}</p>
-            <p className="text-sm" style={{ color: '#717171' }}>
-              {result.gender || 'Unknown'} • Age: {result.age || result.estimated_age || 'N/A'}
+            <p className="text-sm text-muted">
+              {details.name ? `${details.name} • ` : ''}{details.gender || 'Unknown'} • Age: {details.age || details.estimated_age || 'N/A'}
             </p>
-            {result.police_station && (
-              <p className="text-sm" style={{ color: '#717171' }}>{result.police_station}</p>
+            {details.police_station && (
+              <p className="text-sm text-muted">{details.police_station}</p>
             )}
           </div>
         </div>
         <div className="text-right">
           <p className={`text-lg font-medium transition-all group-hover:scale-110 ${
-            confidence >= 75 ? 'text-emerald-400' : 
-            confidence >= 50 ? 'text-yellow-400' : 'text-red-400'
+            result.match_band === 'strong' ? 'text-emerald-400' :
+            result.match_band === 'possible' ? 'text-yellow-400' : 'text-red-400'
           }`}>
             {confidence}%
           </p>
-          <p className="text-xs" style={{ color: '#717171' }}>match</p>
+          <p className="text-xs capitalize text-muted">
+            {result.match_band ? `${result.match_band} match` : 'match'}
+          </p>
         </div>
       </div>
     </div>

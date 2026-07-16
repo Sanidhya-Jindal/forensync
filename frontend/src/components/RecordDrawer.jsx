@@ -1,11 +1,12 @@
+import { useEffect } from 'react';
 import { Copy, X } from 'lucide-react';
 import { useApp } from '../context/AppContext';
-import { assetUrl, formatDate, formatDateTime, formatNumber, joinClasses } from '../utils';
+import { assetUrl, formatDate, formatDateTime, joinClasses } from '../utils';
 
 function Section({ title, children }) {
   return (
-    <section className="rounded-lg border border-slate-700 bg-slate-900/70 p-4">
-      <h3 className="mb-3 text-sm font-semibold uppercase tracking-[0.18em] text-slate-400">{title}</h3>
+    <section className="rounded-lg p-4" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
+      <h3 className="mb-3 text-sm font-semibold uppercase tracking-[0.18em] text-muted">{title}</h3>
       {children}
     </section>
   );
@@ -13,16 +14,16 @@ function Section({ title, children }) {
 
 function InfoRow({ label, value }) {
   return (
-    <div className="grid grid-cols-[160px,1fr] gap-3 py-2 text-sm">
-      <div className="text-slate-400">{label}</div>
-      <div className="text-slate-100">{value || '—'}</div>
+    <div className="grid grid-cols-[150px,1fr] gap-3 py-2 text-sm">
+      <div className="text-muted">{label}</div>
+      <div style={{ color: 'var(--text)' }}>{value || '—'}</div>
     </div>
   );
 }
 
 function BoolPill({ value }) {
   return (
-    <span className={joinClasses('inline-flex items-center rounded-full px-3 py-1 text-xs font-medium', value ? 'bg-emerald-500/15 text-emerald-300' : 'bg-slate-700 text-slate-300')}>
+    <span className={joinClasses('inline-flex items-center rounded-full px-3 py-1 text-xs font-medium', value ? 'bg-emerald-500/15 text-emerald-300' : 'bg-white/10 text-muted')}>
       {value ? 'Yes' : 'No'}
     </span>
   );
@@ -31,6 +32,19 @@ function BoolPill({ value }) {
 export default function RecordDrawer() {
   const { drawerOpen, drawerLoading, drawerRecord, drawerError, closeDrawer } = useApp();
 
+  // Escape to close + lock background scroll while open
+  useEffect(() => {
+    if (!drawerOpen) return;
+    const onKey = (e) => { if (e.key === 'Escape') closeDrawer(); };
+    window.addEventListener('keydown', onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      document.body.style.overflow = prev;
+    };
+  }, [drawerOpen, closeDrawer]);
+
   if (!drawerOpen) return null;
 
   const record = drawerRecord || {};
@@ -38,37 +52,53 @@ export default function RecordDrawer() {
   const photo = assetUrl(record.profile_photo || record.photo_path);
 
   return (
-    <div className="fixed inset-0 z-40 bg-slate-950/80">
-      <div className="absolute inset-y-0 right-0 w-full max-w-4xl overflow-y-auto border-l border-slate-700 bg-navy-900 shadow-soft">
-        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-800 bg-slate-950/90 px-5 py-4 backdrop-blur">
+    // z-[60] so it sits ABOVE the fixed navbar (z-50) — otherwise the navbar
+    // covered this panel's header and hid the close button.
+    <div className="fixed inset-0 z-[60] animate-fade-in" role="dialog" aria-modal="true" aria-label="Case record details">
+      {/* Click the backdrop to close */}
+      <div className="absolute inset-0" style={{ background: 'rgba(0,0,0,0.72)' }} onClick={closeDrawer} />
+
+      <div className="absolute inset-y-0 right-0 flex w-full max-w-4xl flex-col shadow-2xl"
+           style={{ background: 'var(--bg-secondary)', borderLeft: '1px solid var(--border-strong)' }}>
+        <div className="sticky top-0 z-10 flex items-center justify-between px-5 py-4 backdrop-blur"
+             style={{ background: 'rgba(11,11,13,0.95)', borderBottom: '1px solid var(--border)' }}>
           <div>
-            <div className="text-xs uppercase tracking-[0.22em] text-slate-500">Case record</div>
-            <h2 className="font-heading text-xl font-semibold text-white">{record.pid || 'Record details'}</h2>
+            <div className="text-xs uppercase tracking-[0.22em] text-muted">Case record</div>
+            <h2 className="text-xl font-semibold text-white">{record.pid || 'Record details'}</h2>
           </div>
-          <button type="button" onClick={closeDrawer} className="rounded-md border border-slate-700 p-2 text-slate-300 transition hover:bg-slate-800 hover:text-white">
-            <X className="h-4 w-4" />
+          <button type="button" onClick={closeDrawer} aria-label="Close record details"
+                  className="btn-warp">
+            <X className="h-4 w-4" /> Close
           </button>
         </div>
 
-        <div className="space-y-5 p-5">
+        <div className="flex-1 overflow-y-auto space-y-5 p-5">
           {drawerLoading ? (
-            <div className="rounded-lg border border-slate-700 bg-slate-800/70 p-6 text-slate-300">Loading record...</div>
+            <div className="rounded-lg p-6 text-secondary" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>Loading record…</div>
           ) : drawerError ? (
             <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-5 text-red-100">{drawerError}</div>
           ) : (
             <>
               {photo ? (
-                <div className="overflow-hidden rounded-lg border border-slate-700 bg-slate-950">
-                  <img src={photo} alt={record.pid || 'Case photo'} className="h-80 w-full object-cover" />
+                <div className="overflow-hidden rounded-lg flex items-center justify-center"
+                     style={{ border: '1px solid var(--border)', background: '#000', maxHeight: '26rem' }}>
+                  {/* object-contain: show the whole photo instead of zoom-cropping the face */}
+                  <img src={photo} alt={`Case photo for ${record.pid || 'record'}`}
+                       className="max-h-[26rem] w-auto max-w-full object-contain"
+                       onError={(e) => { e.target.style.display = 'none'; }} />
                 </div>
               ) : null}
 
               <div className="flex flex-wrap items-center gap-3">
-                <span className="rounded-full border border-slate-700 bg-slate-900 px-3 py-1 font-mono text-sm text-teal-300">{record.pid || '—'}</span>
-                <span className={joinClasses('rounded-full px-3 py-1 text-xs font-medium', record.status === 'Closed' ? 'bg-slate-700 text-slate-200' : record.status === 'Deceased' ? 'bg-red-500/15 text-red-200' : 'bg-amber-500/15 text-amber-200')}>
+                <span className="rounded-full px-3 py-1 font-mono text-sm"
+                      style={{ border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--accent)' }}>{record.pid || '—'}</span>
+                <span className={joinClasses('rounded-full px-3 py-1 text-xs font-medium', record.status === 'Closed' ? 'bg-white/10 text-secondary' : record.status === 'Deceased' ? 'bg-red-500/15 text-red-200' : 'bg-amber-500/15 text-amber-200')}>
                   {record.status || 'Open'}
                 </span>
-                {isMissing ? null : <span className="rounded-full bg-teal-500/15 px-3 py-1 text-xs font-medium text-teal-200">UIDB</span>}
+                <span className="rounded-full px-3 py-1 text-xs font-medium"
+                      style={{ background: 'var(--accent-soft)', color: 'var(--accent)' }}>
+                  {isMissing ? 'Missing Person' : 'Unidentified Body'}
+                </span>
               </div>
 
               <div className="grid gap-4 lg:grid-cols-2">
@@ -107,15 +137,15 @@ export default function RecordDrawer() {
                   <InfoRow label="Person Description" value={record.person_description} />
                   <div className="mt-4 grid grid-cols-3 gap-3">
                     <div>
-                      <div className="mb-2 text-xs uppercase tracking-[0.18em] text-slate-500">DNA</div>
+                      <div className="mb-2 text-xs uppercase tracking-[0.18em] text-muted">DNA</div>
                       <BoolPill value={Boolean(record.dna_sample_collected)} />
                     </div>
                     <div>
-                      <div className="mb-2 text-xs uppercase tracking-[0.18em] text-slate-500">Dental</div>
+                      <div className="mb-2 text-xs uppercase tracking-[0.18em] text-muted">Dental</div>
                       <BoolPill value={Boolean(record.dental_records_available)} />
                     </div>
                     <div>
-                      <div className="mb-2 text-xs uppercase tracking-[0.18em] text-slate-500">Fingerprints</div>
+                      <div className="mb-2 text-xs uppercase tracking-[0.18em] text-muted">Fingerprints</div>
                       <BoolPill value={Boolean(record.fingerprints_collected)} />
                     </div>
                   </div>
@@ -131,12 +161,12 @@ export default function RecordDrawer() {
                 </div>
               </Section>
 
-              <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-700 bg-slate-900 px-4 py-3">
-                <div className="text-sm text-slate-400">Vector and case details are available for this record.</div>
-                <button type="button" onClick={() => navigator.clipboard.writeText(record.pid || '')} className="inline-flex items-center gap-2 rounded-md bg-teal-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-teal-500">
-                  <Copy className="h-4 w-4" />
-                  Copy PID
+              <div className="flex flex-wrap items-center justify-end gap-3 rounded-lg px-4 py-3"
+                   style={{ border: '1px solid var(--border)', background: 'var(--surface)' }}>
+                <button type="button" onClick={() => navigator.clipboard.writeText(record.pid || '')} className="btn-warp">
+                  <Copy className="h-4 w-4" /> Copy PID
                 </button>
+                <button type="button" onClick={closeDrawer} className="btn-warp-primary">Close</button>
               </div>
             </>
           )}

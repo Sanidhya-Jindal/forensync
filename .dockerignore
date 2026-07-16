@@ -1,0 +1,28 @@
+# Keep the build context small and the image clean.
+.git
+.venv
+venv
+env
+__pycache__
+**/__pycache__
+*.pyc
+
+# node deps are installed inside the build stage
+frontend/node_modules
+frontend/dist
+
+# local-only runtime state (rebuilt/recreated in the container)
+qdrant_data
+temp_*.jpg
+temp_*.png
+*.log
+server.log
+server.err.log
+server_crash.log
+
+# local tooling / docs not needed at runtime
+.vscode
+.idea
+sample dead
+sample missing
+*.msix

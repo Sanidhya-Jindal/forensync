@@ -242,7 +242,7 @@ function ReportMissingPerson() {
             <div className="flex-1">
               <label className="block text-sm mb-2" style={{ color: '#9B9B9B' }}>Profile Photo</label>
               <input type="file" accept="image/*" onChange={handlePhotoChange} className="input-warp" />
-              <p className="text-xs mt-2" style={{ color: '#717171' }}>Upload a recent photo for better matching accuracy</p>
+              <p className="text-xs mt-2" style={{ color: '#8A8A92' }}>Upload a recent photo for better matching accuracy</p>
             </div>
             {photoPreview && (
               <div className="w-24 h-24 rounded-lg overflow-hidden" style={{ border: '1px solid #333333' }}>

@@ -35,17 +35,25 @@ export function formatNumber(num) {
   return Number(num).toLocaleString();
 }
 
-// Get Tailwind status color classes
+/**
+ * Map a record status to a semantic tone key.
+ * Callers (CaseRecords / Dashboard StatusBadge) look this up in their own
+ * class maps, so this must return a KEY ('success' | 'warning' | ...),
+ * not a class string.
+ */
 export function getStatusTone(status) {
   const tones = {
-    Open: 'bg-yellow-100 text-yellow-800 border-yellow-300',
-    Matched: 'bg-green-100 text-green-800 border-green-300',
-    Closed: 'bg-slate-100 text-slate-600 border-slate-300',
-    Pending: 'bg-blue-100 text-blue-800 border-blue-300',
-    Processed: 'bg-teal-100 text-teal-800 border-teal-300',
-    Archived: 'bg-gray-100 text-gray-600 border-gray-300',
+    open: 'warning',
+    pending: 'warning',
+    identified: 'success',
+    matched: 'success',
+    found: 'success',
+    processed: 'success',
+    deceased: 'danger',
+    closed: 'muted',
+    archived: 'muted',
   };
-  return tones[status] || 'bg-slate-100 text-slate-600 border-slate-300';
+  return tones[String(status || '').toLowerCase()] || 'default';
 }
 
 // Build a full asset URL from a relative path
